@@ -1,365 +1,185 @@
 # AllerNav
 
-AllerNav is an Agentic AI Dining Safety Assistant. The v2 frontend is a map-first Next.js app, with a FastAPI service available for dining/search/menu/agent APIs.
+**An agentic AI dining-safety assistant that turns restaurant menus into evidence-backed allergen guidance.**
 
-That means:
+AllerNav helps diners find restaurants, inspect menu evidence, and identify dishes to discuss with staff. A map-first Next.js interface connects to a Python/FastAPI backend for menu ingestion, a LangGraph analysis workflow, retrieval-augmented explanations, and deterministic allergen scoring.
 
-- one repo
-- one Vercel project
-- one public link
+## The problem
 
-The app handles both the UI and the API from `apps/web`.
+Restaurant information is fragmented across websites, PDF menus, images, and reviews. Dish names often omit ingredients, and positive reviews do not establish how a kitchen handles cross-contact. AllerNav brings those sources together, preserves their provenance, and makes missing information visible alongside recommendations.
 
-## Local setup
+A diner can select allergens, search the map, scan an official menu, inspect dish-level risk reasons, and ask questions about nearby restaurants. Results include source evidence and suggested staff questions. **AllerNav provides decision support, not a guarantee that a meal is safe.**
 
-1. Install web dependencies:
+## Architecture
 
-```bash
-cd apps/web
-npm install
+The project separates evidence collection, deterministic risk decisions, and optional language-model explanations. The frontend uses **Next.js, React, and TypeScript**; **FastAPI** exposes typed Python APIs; **LangGraph** coordinates the staged dining-analysis workflow.
+
+```text
+Diner: location, question, selected allergens
+                    |
+        Next.js / React / TypeScript
+        Map UI + same-origin API routes
+             |                  |
+       Google Places       FastAPI backend
+                                |
+              +-----------------+--------------------+
+              |                 |                    |
+       LangGraph analysis   Menu ingestion     Nearby RAG service
+       profile / context    HTML / JSON-LD     menu-based ranking
+       menu retrieval       PDF / image OCR    evidence retrieval
+       deterministic risk        |             optional explanation
+       evidence / response       |                    ^
+       confidence gate      SQLite / Supabase ---------+
+                                 |
+                         Azure AI Search
+                    keyword + optional vector search
+
+Optional durable ingestion:
+FastAPI -> Supabase job + Azure Service Bus -> Azure Functions
+        -> Document Intelligence OCR -> Azure OpenAI normalization
+        -> persisted menu -> Azure AI Search indexing
+
+LangSmith: traces Python graph, retrieval, normalization, explanations
 ```
 
-2. Create `apps/web/.env.local` from `apps/web/.env.example`.
+The web app has its own search and restaurant-detail routes. It bridges to FastAPI for agent analysis and nearby RAG; deploying the web app alone does not enable the Python workflow or Azure worker.
 
-3. Use separate Google keys:
+### Agentic workflow with LangGraph
 
-```bash
-NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=your_browser_maps_key
-GOOGLE_PLACES_API_KEY=your_server_places_key
-GEMINI_API_KEY=your_gemini_key
-GEMINI_MODEL=gemini-3.5-flash
+[`agent_graph.py`](apps/api/allernav_api/agent_graph.py) defines a typed `StateGraph` with seven sequential stages:
+
+```text
+Intent/profile -> Restaurant/menu retrieval -> Normalization stage
+  -> Allergen risk engine -> Evidence selection -> Explanation stage
+  -> Safety/confidence gate
 ```
 
-The browser key must allow the Maps JavaScript API and the site referrer. The server key must allow Places API and must not be restricted by browser referrer.
+Retrieval uses supplied menu context, stored menus, or official-site ingestion. The risk engine produces dish assessments, evidence fragments, missing-information notes, and recommended actions. The final stage records whether the result calls for verification, avoidance, staff questions, or abstention.
 
-4. Start the app from the repo root:
+This is a bounded orchestration workflow with fixed edges. Some named stages currently record trace information around work performed by ingestion and the risk engine; they are not separate autonomous agents or LLM calls. Optional model-based normalization and RAG explanation generation live in their respective services. A sequential fallback preserves the workflow if LangGraph cannot be imported.
+
+### Menu ingestion and document understanding
+
+[`menu_ingestion.py`](apps/api/allernav_api/menu_ingestion.py) discovers menu links through restaurant pages, common menu paths, sitemaps, and HTML/JSON-LD parsing. Optional Google Programmable Search or SerpAPI discovery and Apify Playwright rendering extend coverage when static pages are insufficient.
+
+**Azure Document Intelligence** extracts text from PDF and image menus. The pipeline retains source URLs, timestamps, extraction methods, and available OCR confidence. Parsing filters out navigation, promotional text, and other non-dish content. Tests also cover Arabic menu text and allergen aliases.
+
+The durable image-menu worker uses **LangChain with Azure OpenAI structured output** to normalize English OCR into validated dish records, checking names, descriptions, and prices against the source text. That normalization path is English-only and does not translate menus. Squarespace discovery can select the newest complete numbered image edition.
+
+### RAG and Azure AI Search
+
+[`rag_service.py`](apps/api/allernav_api/rag_service.py) combines candidate restaurants, scanned menus, deterministic restaurant-fit scores, and retrieved evidence. Unscanned restaurants are marked as needing a scan rather than assigned a menu-based allergy-fit score.
+
+**Azure AI Search** indexes dish-level documents with source metadata and supports keyword queries plus optional Azure OpenAI embeddings for hybrid retrieval. The checked-in [index schema](apps/api/azure_search_index.json) uses a 1,536-dimensional HNSW vector index. Without Azure Search configuration, retrieval uses local keyword and rule-based semantic matching over stored menus; this fallback does not perform vector similarity search.
+
+For supported evidence-backed questions, explanations try Azure OpenAI, then Gemini, then a deterministic response. Retrieval relevance and generated text do not determine the underlying allergen risk labels or restaurant-fit scores.
+
+### Deterministic allergen safety scoring
+
+The scoring layer is implemented in [`risk_engine.py`](apps/api/allernav_api/risk_engine.py), [`menu_risk.py`](apps/api/allernav_api/menu_risk.py), and [`restaurant_scoring.py`](apps/api/allernav_api/restaurant_scoring.py).
+
+- Dish rules inspect explicit allergen terms, structured allergen codes, inferred risks, and preparation wording.
+- Menu labels distinguish `avoid`, `needs_check`, `possible_lower_risk`, and `insufficient_info`.
+- Restaurant-fit scores aggregate dish classifications and penalize shared-preparation signals and relevant adverse review language.
+- The graph accounts for source quality, missing ingredient information, and stricter allergy profiles, with an insufficient-evidence outcome when appropriate.
+
+These are explainable heuristics, not a trained or clinically validated risk model. “Possible lower risk” means the available evidence still needs verification; absence of an allergen term does not establish safety. Review-based scoring also exists in the web and API layers and should be distinguished from menu-based scoring.
+
+### Persistence, background jobs, and observability
+
+| Component | Role implemented in this repository |
+| --- | --- |
+| **Supabase** | Menu records, document metadata, refresh jobs, OCR page progress, and community reviews. Supabase Auth supports Google sign-in for community submissions and points. |
+| **SQLite** | Local menu and review caches when developing without durable cloud storage. |
+| **Azure Service Bus** | Queues menu-refresh messages after the API persists a job. |
+| **Azure Functions** | Python queue consumer with retry-aware processing, cached OCR page reuse, and up to three concurrent document extractions. Menu publication and search indexing have separate statuses. |
+| **LangSmith** | Optional traces for the LangGraph workflow, retrieval, OCR normalization, and RAG explanations, including evidence and outcome metadata. |
+| **Google Maps / Places** | Map display, restaurant discovery, place details, photos, and review snippets. |
+| **Apify** | Optional rendered menu discovery and expanded reviews through explicit refresh requests. |
+
+## Engineering focus and current scope
+
+The implementation demonstrates typed API contracts, structured model output with grounding checks, retrieval with provenance, deterministic decision logic, background processing, and observable fallback paths. Existing tests cover allergen matching, insufficient evidence, prompt-injection examples, OCR parsing, retrieval citations, worker retries, and frontend request/ranking behavior.
+
+The repository includes demo fixtures and local restaurant snapshots. Feedback and profile/saved-place endpoints include in-memory state; they are not a complete persistent user-profile system. Cloud integrations require configuration and provisioning. Tests establish specific behaviors, not clinical accuracy, production readiness, or comprehensive resistance to prompt injection.
+
+## Repository map
+
+```text
+apps/web/
+  src/app/                 Next.js interface and API routes
+  src/components/          Map, allergy picker, evidence/menu panels, auth
+  src/lib/                 Client API, types, ranking helpers, tests
+  src/server/              Places, menu/review services, scoring, tests
+apps/api/
+  app.py                   FastAPI routes
+  allernav_api/            Graph, ingestion, retrieval, scoring, storage
+  function_app.py          Azure Functions Service Bus trigger
+  tests/                   Python unit, integration-style, and RAG checks
+  scripts/                 Search-index setup and manual cloud checks
+  azure_search_index.json  Azure AI Search schema
+  supabase.sql             Persistence schema
+  AZURE_MENU_WORKER.md      Worker infrastructure and deployment guide
+docs/setup.md              Local setup, configuration, deployment, diagnostics
+```
+
+## Run locally
+
+Use **Node.js 24.x** (declared in the packages) and **Python 3.11+**. Run commands from the repository root unless stated otherwise.
 
 ```bash
-cd /Users/nikitamiller/Desktop/allernav
+npm ci
+cp apps/web/.env.example apps/web/.env.local
+python3 -m venv apps/api/.venv
+apps/api/.venv/bin/python -m pip install -r apps/api/requirements.txt
+cp apps/api/.env.example apps/api/.env
+```
+
+Fill in the Google Maps browser key and Google Places server key in the local environment files. For the full application, set `FASTAPI_API_BASE_URL=http://localhost:8000` in the web environment. Leave `NEXT_PUBLIC_API_BASE_URL` unset to keep browser requests on the Next.js routes, including community authentication routes.
+
+Start the backend and frontend in separate terminals:
+
+```bash
+# Terminal 1
+cd apps/api
+.venv/bin/python -m uvicorn app:app --reload --port 8000
+```
+
+```bash
+# Terminal 2, repository root
 npm run dev
 ```
 
-Then open:
+Open [the web app](http://localhost:3000) and [FastAPI's interactive API docs](http://localhost:8000/docs). Core rule-based analysis does not require an LLM key. OCR, cloud retrieval, durable refresh, community sign-in, and generated explanations each require their corresponding configuration.
+
+See [setup and deployment](docs/setup.md) for environment-variable groups, Azure Search setup, authentication, tracing, menu-refresh examples, and deployment options. See the [Azure worker guide](apps/api/AZURE_MENU_WORKER.md) for queue infrastructure and worker operations.
+
+## Tests and checks
 
 ```bash
-http://localhost:3000
-```
+# Existing frontend tests
+npm test
 
-## Deploy With One Link
+# Existing backend tests; live Azure smoke tests remain disabled
+ALLERNAV_LIVE_CLOUD_TESTS=false PYTHONPATH=apps/api \
+  apps/api/.venv/bin/python -m pytest apps/api/tests
 
-Use a single Vercel project connected to this GitHub repo.
-
-Preferred Vercel settings:
-
-- Root Directory: `apps/web`
-- Framework Preset: `Next.js`
-- Install Command: `npm install`
-- Build Command: `npm run build`
-
-The root package is configured with npm workspaces for local commands, but the Vercel project should still use `apps/web` as its Root Directory so Vercel detects and serves the Next.js app.
-
-Vercel environment variables:
-
-- `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`
-- `GOOGLE_PLACES_API_KEY`
-- `GEMINI_API_KEY` (optional; enables Gemini-written menu recommendations)
-- `GEMINI_MODEL` (defaults to `gemini-3.5-flash`)
-- `LANGSMITH_TRACING` (optional; set to `true` to trace the FastAPI/LangGraph backend)
-- `LANGSMITH_API_KEY` (optional; LangSmith key, not an OpenAI key)
-- `LANGSMITH_PROJECT` (defaults to `allernav` when set)
-- `APIFY_TOKEN` (optional; enables expanded Google review retrieval)
-- `APIFY_REVIEWS_ACTOR` (defaults to `kaix~google-maps-reviews-scraper`)
-- `APIFY_REVIEWS_LIMIT` (defaults to `100`)
-- `APIFY_REVIEWS_SORT` (defaults to `newest`)
-- `APIFY_LANGUAGE` (defaults to `en`)
-- `APIFY_REGION` (defaults to `US`)
-- `NEXT_PUBLIC_API_BASE_URL` (set to the FastAPI service URL when deployed)
-- `SUPABASE_URL`
-- `SUPABASE_ANON_KEY`
-
-Google is required for search and maps. Gemini is optional; the app falls back to cautious heuristic recommendations when it is missing. Apify is optional; when it is missing, AllerNav uses the limited review snippets returned by Google Places.
-
-After deploy, check:
-
-```bash
-https://your-project.vercel.app/api/health
-```
-
-`ok: true` means the required Google server and browser keys are configured.
-
-After deploy, Vercel gives you one URL such as:
-
-```bash
-https://your-project.vercel.app
-```
-
-That is the only link you need to share.
-
-## Upload To GitHub
-
-If this folder is not already connected to your GitHub repo, run these commands from the project root:
-
-```bash
-git add .
-git commit -m "Simplify Allernav to one-link deployment"
-git branch -M main
-git remote add origin https://github.com/YOUR_USERNAME/YOUR_REPO.git
-git push -u origin main
-```
-
-If `origin` already exists, replace the `git remote add origin ...` line with:
-
-```bash
-git remote set-url origin https://github.com/YOUR_USERNAME/YOUR_REPO.git
-```
-
-## Useful Commands
-
-From the repo root:
-
-```bash
-npm run dev
-npm run test
+# Additional frontend checks
+npm run lint
 npm run build
 ```
 
-## Agentic FastAPI Backend
-
-The FastAPI service now includes a first-pass LangGraph dining-safety workflow with deterministic allergen risk scoring.
-
-Run the backend locally:
+Live Azure checks are opt-in and use configured cloud resources:
 
 ```bash
-cd apps/api
-python3 -m pip install -r requirements.txt
-PYTHONPATH=. python3 -m uvicorn app:app --reload --port 8000
+ALLERNAV_LIVE_CLOUD_TESTS=true PYTHONPATH=apps/api \
+  apps/api/.venv/bin/python -m pytest apps/api/tests/test_live_azure_smoke.py
 ```
 
-Useful endpoints:
+The Next.js configuration currently skips TypeScript errors during builds, so a successful build alone is not evidence of type correctness.
 
-```text
-POST /analyze-restaurant
-POST /analyze-menu
-POST /recommend-dishes
-POST /chat
-POST /feedback
-GET  /restaurants/{id}/evidence
-GET  /api/places/{id}/menu
-POST /api/places/{id}/menu-refresh
-GET  /api/menu-refresh-jobs/{job_id}
-GET  /api/places/{id}/reviews
-POST /api/places/{id}/reviews-refresh
-POST /api/restaurants/{id}/search-index
-POST /api/search/hybrid
-```
+## Configuration and data handling
 
-Menu ingestion stores extracted HTML/JSON-LD menu records in SQLite. PDF and image menu links are detected as document sources and can be extracted with Azure Document Intelligence when these variables are set:
+Commit only blank or placeholder configuration templates. Local environment files, caches, and databases are ignored by Git. Server credentials, including the Supabase service-role key, must never use a `NEXT_PUBLIC_` prefix.
 
-```bash
-AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT=
-AZURE_DOCUMENT_INTELLIGENCE_KEY=
-```
-
-Menu refresh uses a layered discovery flow:
-
-- static restaurant website links, sitemaps, and common `/menu` paths
-- optional web search discovery through Google Programmable Search or SerpAPI for official menu pages, item pages, PDFs, and images
-- Azure Document Intelligence OCR for discovered PDFs and menu images
-- rendered website browsing through Apify Playwright as a bounded fallback; discovered menu/category pages are opened directly and visible load-more controls are expanded
-
-When Supabase and Azure Service Bus are configured, refresh becomes a durable two-stage job. Squarespace menu pages are inspected for numbered image editions, the newest complete edition is queued, and an Azure Function processes up to three images concurrently. The worker uses Azure Document Intelligence for OCR, LangChain with Azure OpenAI structured output for English dish normalization, and the deterministic allergen engine for risk decisions.
-
-```bash
-AZURE_SERVICE_BUS_SEND_CONNECTION_STRING=
-AZURE_SERVICE_BUS_MENU_QUEUE=menu-refresh
-AZURE_OPENAI_CHAT_DEPLOYMENT=
-AZURE_OPENAI_CHAT_API_VERSION=2024-10-21
-```
-
-Run `apps/api/supabase.sql` before enabling the queue so `menu_refresh_jobs` and `menu_document_pages` exist. Deployment commands and worker credential setup are documented in `apps/api/AZURE_MENU_WORKER.md`.
-
-### Azure Functions menu worker
-
-The Python v2 Function in `apps/api/function_app.py` consumes the `menu-refresh` queue and calls the shared `process_menu_refresh_message` worker. The Function requires a listen-capable `AZURE_SERVICE_BUS_CONNECTION_STRING` plus Supabase, Document Intelligence, Azure AI Search, Azure OpenAI, and optional Apify settings listed in `apps/api/local.settings.json.example`.
-
-1. Set `AZURE_SERVICE_BUS_CONNECTION_STRING` in the Function App settings.
-2. Set `AZURE_SERVICE_BUS_MENU_QUEUE=menu-refresh`.
-3. Deploy the Function App.
-4. In Service Bus Explorer, confirm the queue's Active message count decreases.
-5. Check Function App logs for processed jobs, including `job_id`, `place_id`, `status`, and `item_count`.
-
-```bash
-cd apps/api
-python3 -m pip install -r requirements.txt
-func azure functionapp publish "$FUNCTION_APP" --python
-```
-
-Before publishing, run the worker directly without Service Bus:
-
-```bash
-cd apps/api
-PYTHONPATH=. python3 scripts/test_menu_worker_message.py ./sample-menu-job.json
-```
-
-After enqueueing a menu refresh, poll `/api/menu-refresh-jobs/{job_id}` and confirm that the Service Bus active-message count decreases. Stream invocation output with `az functionapp log tail --resource-group "$AZURE_RESOURCE_GROUP" --name "$FUNCTION_APP"`; successful entries include `job_id`, `place_id`, `status`, and `item_count`. Full infrastructure, app settings, verification, and dead-letter guidance are in `apps/api/AZURE_MENU_WORKER.md`.
-
-Check durable persistence without exposing credentials:
-
-```bash
-curl "http://localhost:8000/api/debug/storage"
-```
-
-The response separately reports whether the environment is configured, menu records can be read, and refresh jobs can be inserted. `SUPABASE_URL` may be either the project URL or its `/rest/v1` endpoint; AllerNav normalizes both forms. PostgREST code `PGRST125` means the request used an invalid API path. An undefined-table error instead means the checked-in Supabase migration still needs to be applied.
-
-### Google login and community points
-
-AllerNav browsing and menu scans remain public. Posting a community allergy review requires a Supabase account so review points can be tied to one reviewer and totaled across submissions.
-
-1. Run `apps/api/supabase.sql` in the Supabase SQL editor to create `community_reviews`.
-2. In Supabase, open **Authentication > Providers > Google**, enable Google, and add the Google OAuth client ID and secret.
-3. Add the Supabase callback URL shown on that provider screen to the Google Cloud OAuth client's authorized redirect URIs.
-4. In **Authentication > URL Configuration**, add the local and deployed app URLs, including `http://localhost:3000` and `https://allernav.vercel.app`.
-5. Set these on the `allernav` Vercel project: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, and server-only `SUPABASE_SERVICE_ROLE_KEY`.
-
-Never prefix the service-role key with `NEXT_PUBLIC_` or expose it to browser code.
-
-Interactive refreshes use one overall time budget so blocked pages cannot starve later fallbacks. If menu candidates are found but extraction exceeds that budget, the trace reports `needs_background_refresh` instead of treating the source as absent.
-
-```bash
-MENU_INGESTION_TIMEOUT_SECONDS=45
-MENU_FETCH_TIMEOUT_SECONDS=4
-WEB_MENU_SEARCH_TIMEOUT_SECONDS=6
-```
-
-Set one of these optional web search providers in `apps/api/.env` to let refresh find public menu PDFs/photos beyond the restaurant homepage:
-
-```bash
-GOOGLE_SEARCH_API_KEY=
-GOOGLE_SEARCH_ENGINE_ID=
-# or
-SERPAPI_API_KEY=
-```
-
-By default the SQLite database is created at:
-
-```text
-apps/api/.data/menu_ingestion.sqlite
-```
-
-That `.data` directory is local-only and ignored by git. Override it when needed:
-
-```bash
-ALLERNAV_MENU_DB=/tmp/allernav-menu.sqlite
-```
-
-Refresh a menu from an official restaurant site:
-
-```bash
-curl -X POST "http://localhost:8000/api/places/demo/menu-refresh?restaurant_name=Demo&website_url=https://example.com"
-```
-
-The public Arabic OCR fixture can be sent directly to the same pipeline. Azure Document Intelligence preserves the Arabic source text; querying the resulting menu with allergens returns English risk reasons alongside source-backed Arabic items and their PDF URL.
-
-```bash
-curl -X POST "http://localhost:8000/api/places/arabic-ocr-demo/menu-refresh" \
-  --get \
-  --data-urlencode "restaurant_name=AllerNav Arabic OCR Demo" \
-  --data-urlencode "website_url=https://allernav.vercel.app/demo/allernav_arabic_menu_ocr_test.pdf" \
-  --data-urlencode "force_refresh=true"
-
-# Use the id returned above until the job reaches complete or failed.
-curl "http://localhost:8000/api/menu-refresh-jobs/JOB_ID"
-
-# English risk summaries cite the original Arabic item through source_url.
-curl "http://localhost:8000/api/places/arabic-ocr-demo/menu?allergens=sesame&allergens=fish&allergens=peanut"
-```
-
-The same endpoints are also available under `/api/...` so the existing frontend API prefix can target this service with:
-
-```bash
-NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
-```
-
-For the Next.js route bridge, set this server-side value in `apps/web/.env.local`:
-
-```bash
-FASTAPI_API_BASE_URL=http://localhost:8000
-```
-
-Azure AI Search indexing and hybrid retrieval are optional until Phase 3 infrastructure is provisioned:
-
-```bash
-AZURE_SEARCH_ENDPOINT=
-AZURE_SEARCH_API_KEY=
-AZURE_SEARCH_INDEX_NAME=allernav-menu-evidence
-```
-
-Create or update the Azure AI Search index from the checked-in schema:
-
-```bash
-cd apps/api
-PYTHONPATH=. python3 scripts/setup_azure_search_index.py
-```
-
-The index schema lives at `apps/api/azure_search_index.json`. It is configured for 1536-dimensional embeddings, matching `text-embedding-3-small`.
-
-The deterministic allergen engine remains the safety authority. Hybrid/vector retrieval can surface evidence, but it does not decide that a dish is lower risk.
-
-Live Azure smoke tests are opt-in so normal unit tests never call paid cloud APIs:
-
-```bash
-ALLERNAV_LIVE_CLOUD_TESTS=true PYTHONPATH=apps/api python3 -m pytest apps/api/tests/test_live_azure_smoke.py
-```
-
-## LangSmith Tracing
-
-LangSmith is the observability layer for LangChain/LangGraph applications. In AllerNav, it traces the FastAPI agent backend in `apps/api/allernav_api/agent_graph.py`.
-
-You do not need an OpenAI API key for the current backend trace. The current LangGraph path uses deterministic retrieval, ingestion, scoring, evidence selection, and safety gating. You only need `OPENAI_API_KEY` later if you add an OpenAI model call to a traced step.
-
-Set these in `apps/api/.env` for local FastAPI and in the deployed API environment if FastAPI is deployed separately:
-
-```bash
-LANGSMITH_TRACING=true
-LANGSMITH_ENDPOINT=https://api.smith.langchain.com
-LANGSMITH_API_KEY=your_langsmith_key
-LANGSMITH_PROJECT=allernav
-LANGCHAIN_CALLBACKS_BACKGROUND=false
-```
-
-When enabled, LangSmith will show:
-
-- the top-level `AllerNav Dining Safety Graph` run
-- the compiled `AllerNav LangGraph` run
-- LangGraph node timing and ordering
-- metadata such as restaurant ID, restaurant name, selected allergens, and menu source count
-- whether the trace ended in verification, avoidance, staff questions, or insufficient evidence
-
-Do not put secrets, private user profiles, or raw sensitive health details into trace metadata. Allergy selections are currently included because this is a demo decision-support project; remove that metadata before handling real user accounts.
-
-Expanded Google review retrieval is optional through Apify. Set these in `apps/api/.env` for FastAPI and in the Vercel web project environment if the Next.js API route is serving place details directly:
-
-```bash
-APIFY_TOKEN=
-APIFY_API_BASE_URL=https://api.apify.com/v2
-APIFY_REVIEWS_ACTOR=kaix~google-maps-reviews-scraper
-APIFY_REVIEWS_LIMIT=100
-APIFY_REVIEWS_SORT=newest
-APIFY_LANGUAGE=en
-APIFY_REGION=US
-APIFY_REVIEWS_SEARCH_QUERY=
-APIFY_REVIEWS_NEWER_THAN=
-APIFY_REVIEWS_OLDER_THAN=
-APIFY_TIMEOUT_SECONDS=8
-APIFY_REVIEWS_CACHE_TTL_HOURS=168
-ALLERNAV_REVIEWS_DB=./.data/apify_reviews.sqlite
-```
-
-Apify reviews are treated as supplemental warning evidence. They can increase caution when allergy, cross-contact, staff knowledge, or reaction language appears, but they do not prove a dish is lower risk. Place details do not call Apify directly; expanded reviews are loaded through the explicit `/reviews-refresh` route so Vercel place-detail functions stay fast. Leave `APIFY_REVIEWS_SEARCH_QUERY` blank for the app default; AllerNav fetches a bounded review set and then locally ranks allergy-relevant language so it does not miss synonyms like celiac, cross-contact, dedicated fryer, peanut, sesame, or dairy.
-
-Backend checks:
-
-```bash
-cd /Users/nikitamiller/Desktop/allernav
-PYTHONPATH=apps/api python3 -m pytest apps/api/tests
-```
+Tracing can include selected allergens, questions, and menu evidence. Enable it deliberately and review what is sent to LangSmith and model providers before using personal data. The setup guide uses placeholders and contains no deployment credentials.
