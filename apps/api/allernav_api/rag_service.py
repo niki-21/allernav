@@ -92,6 +92,8 @@ async def suggest_nearby_places_service(
     questions = build_recommended_questions(payload.allergens)
     top_scan_candidates = scan_needed[:3]
     answer = build_nearby_summary(payload, len(candidates), scanned, scan_needed, top_scan_candidates)
+    if scanned and evidence and re.search(r"\b(does|do|is|are|contain|contains|ingredient|allergen)\b", payload.question, re.IGNORECASE):
+        answer = await generate_nearby_answer(payload, scanned[:3], evidence, missing_information, questions)
     retrieval_mode = "hybrid_keyword_semantic" if scanned else "scanned_menu_evidence_needed"
     trace_nearby_result(payload, suggestions, retrieval_mode, top_scan_candidates)
     scan_job_ids = [item.scan_job_id for item in suggestions if item.scan_job_id]

@@ -1011,6 +1011,30 @@ textarea {
   cursor: not-allowed;
 }
 
+.nearby-sample-queries {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.nearby-sample-queries button {
+  border: 1px solid #d8d6d1;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #44403c;
+  padding: 7px 9px;
+  text-align: left;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.3;
+  cursor: pointer;
+}
+
+.nearby-sample-queries button:hover {
+  border-color: #1b7f62;
+  color: #176b55;
+}
+
 .nearby-rag-answer {
   display: grid;
   gap: 10px;
@@ -2193,6 +2217,9 @@ body {
 .menu-list-item strong {
   color: #202124;
   font-weight: 600;
+  font-family: inherit;
+  text-transform: none;
+  letter-spacing: 0;
 }
 
 .overview-line p,

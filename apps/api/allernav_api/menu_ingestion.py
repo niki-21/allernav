@@ -27,7 +27,7 @@ from .document_intelligence import (
     extract_document_from_url,
     looks_like_document_url,
 )
-from .models import EvidenceFragment, IngestionTraceStep, MenuItem, MenuSection, MenuSource, PlaceMenu, SourceType
+from .models import AllergyTag, EvidenceFragment, IngestionTraceStep, MenuItem, MenuSection, MenuSource, PlaceMenu, SourceType
 from .risk_engine import is_prompt_injection, parse_raw_menu_text
 from .web_menu_discovery import WebMenuCandidate, discover_web_menu_candidates, web_menu_discovery_configured
 
@@ -1475,11 +1475,26 @@ def parse_visible_html_menu(html_text: str) -> list[MenuSection]:
     items: list[MenuItem] = []
 
     for block in blocks:
-        name = first_tag_text(block, ("h2", "h3", "h4", "strong"))
+        heading_match = re.search(r"<(h2|h3|h4|strong)[^>]*>([\s\S]*?)</\1>", block, flags=re.IGNORECASE)
+        heading_html = heading_match.group(2) if heading_match else ""
+        code_text = " ".join(
+            html_to_text(value)
+            for value in re.findall(r"<small[^>]*>([\s\S]*?)</small>", heading_html, flags=re.IGNORECASE)
+        )
+        heading_without_codes = re.sub(r"<small[^>]*>[\s\S]*?</small>", "", heading_html, flags=re.IGNORECASE)
+        name = html_to_text(heading_without_codes) if heading_match else first_tag_text(block, ("h2", "h3", "h4", "strong"))
         description = first_tag_text(block, ("p", "span"))
         if not name:
             continue
-        item = build_menu_item(name, description)
+        name, price = split_menu_heading(name)
+        allergen_codes, confirmed_allergens = parse_menu_allergen_codes(code_text)
+        item = build_menu_item(
+            name,
+            description,
+            price,
+            confirmed_allergens=confirmed_allergens,
+            allergen_codes=allergen_codes,
+        )
         if item:
             items.append(item)
 
@@ -1632,12 +1647,54 @@ def extract_menu_item(value: Any) -> MenuItem | None:
     return build_menu_item(name, description, price)
 
 
-def build_menu_item(name: str, description: str | None = None, price: str | None = None) -> MenuItem | None:
+MENU_ALLERGEN_CODE_MAP: dict[str, AllergyTag] = {
+    "D": AllergyTag.DAIRY,
+    "E": AllergyTag.EGG,
+    "F": AllergyTag.FISH,
+    "G": AllergyTag.WHEAT_GLUTEN,
+    "P": AllergyTag.PEANUT,
+    "S": AllergyTag.SOY,
+    "SE": AllergyTag.SESAME,
+    "C": AllergyTag.SHELLFISH,
+    "SF": AllergyTag.SHELLFISH,
+    "TN": AllergyTag.TREE_NUT,
+}
+
+
+def split_menu_heading(value: str) -> tuple[str, str | None]:
+    cleaned = clean_text(value) or ""
+    match = re.match(r"^(.*?)\s*\|\s*(?:AED\s*)?(\d+(?:\.\d{1,2})?)\s*$", cleaned, flags=re.IGNORECASE)
+    if not match:
+        return cleaned, None
+    return match.group(1).strip(), f"AED {match.group(2)}"
+
+
+def parse_menu_allergen_codes(value: str) -> tuple[list[str], list[AllergyTag]]:
+    codes = [code.upper() for code in re.findall(r"\b(?:TN|SF|SE|D|E|F|G|P|S|C)\b", value.upper())]
+    unique_codes = list(dict.fromkeys(codes))
+    allergens = list(dict.fromkeys(MENU_ALLERGEN_CODE_MAP[code] for code in unique_codes))
+    return unique_codes, allergens
+
+
+def build_menu_item(
+    name: str,
+    description: str | None = None,
+    price: str | None = None,
+    *,
+    confirmed_allergens: list[AllergyTag] | None = None,
+    allergen_codes: list[str] | None = None,
+) -> MenuItem | None:
     name = clean_text(name) or ""
     description = clean_text(description)
     if not looks_like_real_menu_item(name, description):
         return None
-    return MenuItem(name=name, description=description, price=clean_text(price))
+    return MenuItem(
+        name=name,
+        description=description,
+        price=clean_text(price),
+        confirmed_allergens=confirmed_allergens or [],
+        allergen_codes=allergen_codes or [],
+    )
 
 
 def sanitize_sections(
@@ -1665,6 +1722,13 @@ def looks_like_real_menu_item(name: str, description: str | None = None) -> bool
     if is_prompt_injection(name) or (description and is_prompt_injection(description)):
         return False
     normalized = name.lower()
+    if " ".join(normalized.split()).strip(" :-") in {
+        "menu category",
+        "menu categories",
+        "allergen information",
+        "allergens",
+    }:
+        return False
     description_normalized = (description or "").lower()
     combined = f"{normalized} {description_normalized}"
     terms = re.split(r"[^a-z0-9]+", normalized)

@@ -31,6 +31,24 @@ interface TrustPanelProps {
 type PlaceTab = "summary" | "menu" | "community";
 type VerificationTone = "needs-check" | "possible" | "possible-weak" | "avoid" | "unknown";
 
+function displayDishName(value: string): string {
+  const withoutTags = value.replace(/\s*\|\s*(?:AED\s*)?\d+(?:\.\d{1,2})?(?:\s+[A-Z, ]+)?\s*$/i, "").trim();
+  if (!withoutTags || withoutTags !== withoutTags.toUpperCase()) {
+    return withoutTags || value;
+  }
+  return withoutTags
+    .toLowerCase()
+    .replace(/(^|[\s'’/-])([a-z])/g, (_match, prefix: string, letter: string) => `${prefix}${letter.toUpperCase()}`);
+}
+
+function menuItemTooltip(item: MenuItem, detail?: string): string {
+  const confirmed = item.confirmed_allergens ?? [];
+  const allergenText = confirmed.length
+    ? `Menu allergen labels: ${confirmed.map((value) => value.replaceAll("_", " ")).join(", ")}.`
+    : "";
+  return [item.description, allergenText, detail].filter(Boolean).join(" ");
+}
+
 interface MenuVerification {
   label: "Needs check" | "Possible lower-risk" | "Avoid" | "Insufficient info";
   tone: VerificationTone;
@@ -427,7 +445,14 @@ export default function TrustPanel({
         <p className="panel-eyebrow">Place details</p>
         <div className="place-title-with-fit">
           <h2>{data.name}</h2>
-          {hasRestaurantFit && <span className={`restaurant-fit-badge ${restaurantFitTone}`}>{restaurantFitScore}</span>}
+          {hasRestaurantFit && (
+            <span
+              className={`restaurant-fit-badge ${restaurantFitTone}`}
+              title="Menu evidence fit: based on direct allergen matches and the number of dishes worth asking staff about. This is not a safety guarantee."
+            >
+              {restaurantFitScore}
+            </span>
+          )}
           {!allergyMode && data.rating != null && <span className="restaurant-rating-badge">{data.rating.toFixed(1)}★</span>}
         </div>
         {hasRestaurantFit && <p className="restaurant-fit-label">{visibleRestaurantFitLabel}</p>}
@@ -528,8 +553,13 @@ export default function TrustPanel({
             <div className="menu-fit-summary" aria-label="Restaurant allergy fit summary">
               <span className="menu-primary-status">Menu found</span>
               <div className="menu-fit-heading">
-                <strong>Restaurant allergy fit</strong>
-                <span className={`restaurant-fit-badge ${restaurantFitTone}`}>{restaurantFitScore}</span>
+                <strong>Menu evidence fit</strong>
+                <span
+                  className={`restaurant-fit-badge ${restaurantFitTone}`}
+                  title="Based on direct allergen matches and the number of dishes worth asking staff about. This is not a safety guarantee."
+                >
+                  {restaurantFitScore}
+                </span>
                 <b>{visibleRestaurantFitLabel}</b>
               </div>
               <p>
@@ -578,7 +608,7 @@ export default function TrustPanel({
                       <span>{group.count}</span>
                     </div>
                     {visibleItems.map(({ item, sectionTitle, verification }) => {
-                    const tooltip = [item.description, verification.detail].filter(Boolean).join(" ");
+                    const tooltip = menuItemTooltip(item, verification.detail);
                     return (
                       <article
                         key={`${sectionTitle}-${item.name}`}
@@ -587,17 +617,8 @@ export default function TrustPanel({
                       >
                         <div>
                           <div className="menu-item-heading">
-                            <strong>{item.name}</strong>
-                            <span
-                              className={`menu-status-chip ${verification.tone}`}
-                              title={verification.detail}
-                            >
-                              {verification.label}
-                            </span>
+                            <strong>{displayDishName(item.name)}</strong>
                           </div>
-                          {verification.metadata && (
-                            <p className={`menu-item-meta ${verification.tone}`}>{verification.metadata}</p>
-                          )}
                         </div>
                         {item.price && <span className="menu-price">{item.price}</span>}
                       </article>
@@ -633,12 +654,15 @@ export default function TrustPanel({
                     <span>{section.items.length}</span>
                   </div>
                   {section.items.slice(0, 12).map((item) => (
-                    <article key={`${section.title}-${item.name}`} className="menu-list-item compact-menu-row">
+                    <article
+                      key={`${section.title}-${item.name}`}
+                      className="menu-list-item compact-menu-row"
+                      title={menuItemTooltip(item)}
+                    >
                       <div>
                         <div className="menu-item-heading">
-                          <strong>{item.name}</strong>
+                          <strong>{displayDishName(item.name)}</strong>
                         </div>
-                        {item.description && <p className="menu-item-meta">{item.description}</p>}
                       </div>
                       {item.price && <span className="menu-price">{item.price}</span>}
                     </article>

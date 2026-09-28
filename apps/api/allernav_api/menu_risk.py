@@ -86,6 +86,8 @@ NON_FOOD_CATEGORY_NAMES = {
     "extracted menu",
     "kids menu",
     "menu",
+    "menu category",
+    "menu categories",
     "recommended toppings set",
     "recommended toppings",
     "topping",
@@ -171,6 +173,18 @@ def classify_menu_item(
                 "risk_reasons": [f"Menu text or structured evidence identifies selected allergen: {labels}."],
                 "verification_question": f"Can you confirm whether {name} contains {labels} in any ingredient or garnish?",
                 "confidence": round(min(0.98, max(0.78, source_quality + 0.12)), 2),
+            }
+        )
+
+    if item.allergen_codes:
+        labels = ", ".join(allergen.value.replace("_", " ") for allergen in selected_allergens)
+        return item.model_copy(
+            update={
+                "risk_label": "possible_lower_risk",
+                "matched_allergens": [],
+                "risk_reasons": [f"The menu allergen key does not list the selected allergens ({labels})."],
+                "verification_question": f"Can you confirm the allergen key for {name} is current and includes sauces and preparation?",
+                "confidence": round(min(0.94, max(0.72, source_quality + 0.08)), 2),
             }
         )
 

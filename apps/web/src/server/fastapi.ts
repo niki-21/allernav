@@ -5,6 +5,7 @@ type BackendMenuItem = {
   description?: unknown;
   price?: unknown;
   confirmed_allergens?: unknown;
+  allergen_codes?: unknown;
   inferred_risks?: unknown;
   likely_safe_for?: unknown;
   likely_risky_for?: unknown;
@@ -148,6 +149,8 @@ export function normalizeBackendMenu(raw: unknown): PlaceMenu | null {
                     name,
                     description: stringValue(typedItem.description),
                     price: stringValue(typedItem.price),
+                    confirmed_allergens: allergenArray(typedItem.confirmed_allergens),
+                    allergen_codes: stringArray(typedItem.allergen_codes),
                     likely_safe_for: allergenArray(typedItem.likely_safe_for),
                     likely_risky_for: [
                       ...allergenArray(typedItem.likely_risky_for),

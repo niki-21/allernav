@@ -12,6 +12,7 @@ interface MapProps {
   mapFocusPlaceId: string | null;
   searchCenter: LatLng;
   searchTargetPlaceId: string | null;
+  suggestedPlaceIds: string[];
   onPlaceSelect: (placeId: string | null) => void;
   onNativePlaceSelect: (place: PlaceSummary) => void;
   onMapCenterChange: (center: LatLng) => void;
@@ -58,6 +59,7 @@ export default function Map({
   mapFocusPlaceId,
   searchCenter,
   searchTargetPlaceId,
+  suggestedPlaceIds,
   onPlaceSelect,
   onNativePlaceSelect,
   onMapCenterChange,
@@ -71,6 +73,10 @@ export default function Map({
   const suppressedViewportPublishes = useRef(0);
 
   const placeIds = useMemo(() => new Set(places.map((place) => place.id)), [places]);
+  const suggestionRanks = useMemo(
+    () => new globalThis.Map(suggestedPlaceIds.map((placeId, index) => [placeId, index + 1])),
+    [suggestedPlaceIds],
+  );
 
   useEffect(() => {
     if (!mapRef.current) {
@@ -179,15 +185,24 @@ export default function Map({
       {places.map((place) => {
         const isSelected = selectedPlaceId === place.id;
         const isSearchTarget = searchTargetPlaceId === place.id;
+        const suggestionRank = suggestionRanks.get(place.id);
+        const isSuggested = suggestionRank !== undefined;
 
         return (
           <Marker
             key={place.id}
             position={place.location}
             onClick={() => onPlaceSelect(place.id)}
-            zIndex={isSelected ? 60 : isSearchTarget ? 50 : 10}
+            zIndex={isSelected ? 70 : isSuggested ? 60 : isSearchTarget ? 50 : 10}
             label={
-              isSearchTarget
+              isSuggested
+                ? {
+                    text: String(suggestionRank),
+                    color: "#ffffff",
+                    fontSize: "12px",
+                    fontWeight: "700",
+                  }
+                : isSearchTarget
                 ? {
                     text: "●",
                     color: "#fffaf4",
@@ -198,11 +213,11 @@ export default function Map({
             }
             icon={{
               path: google.maps.SymbolPath.CIRCLE,
-              scale: isSelected ? 12 : isSearchTarget ? 10 : 8,
-              fillColor: getMarkerColor(details[place.id]),
+              scale: isSelected ? 12 : isSuggested ? 11 : isSearchTarget ? 10 : 8,
+              fillColor: isSuggested ? "#176b55" : getMarkerColor(details[place.id]),
               fillOpacity: 1,
-              strokeColor: isSearchTarget ? "#1b7f62" : "#fffaf4",
-              strokeWeight: isSearchTarget ? 4 : 2,
+              strokeColor: isSuggested || isSearchTarget ? "#f4b942" : "#fffaf4",
+              strokeWeight: isSuggested || isSearchTarget ? 4 : 2,
             }}
           />
         );

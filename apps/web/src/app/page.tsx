@@ -40,6 +40,11 @@ import type {
 
 const DEFAULT_CENTER: LatLng = { lat: 25.2048, lng: 55.2708 };
 const DEFAULT_QUERY = "";
+const SAMPLE_QUESTIONS = [
+  "Which nearby restaurants have the clearest menu evidence for my allergies?",
+  "Does chicken biryani contain soy?",
+  "Find three nearby restaurants and scan their menus.",
+];
 
 function nearbyEvidenceStatus(status: string): string {
   const labels: Record<string, string> = {
@@ -571,8 +576,8 @@ export default function Home() {
     }
   };
 
-  const askNearby = async (allowBackgroundScan = false) => {
-    const question = nearbyQuestion.trim();
+  const askNearby = async (allowBackgroundScan = false, questionOverride?: string) => {
+    const question = (questionOverride ?? nearbyQuestion).trim();
     if (!question) {
       return;
     }
@@ -777,6 +782,7 @@ export default function Home() {
           mapFocusPlaceId={mapFocusPlaceId}
           searchCenter={searchCenter}
           searchTargetPlaceId={searchTargetPlaceId}
+          suggestedPlaceIds={(nearbyAnswer?.places ?? []).slice(0, 3).map((suggestion) => suggestion.place.id)}
           onPlaceSelect={selectPlace}
           onNativePlaceSelect={selectNativePlace}
           onMapCenterChange={(center) => {
@@ -844,7 +850,7 @@ export default function Home() {
               className="nearby-rag-form"
               onSubmit={(event) => {
                 event.preventDefault();
-                void askNearby(false);
+                void askNearby(true);
               }}
             >
               <textarea
@@ -857,6 +863,21 @@ export default function Home() {
                 {isSearching ? "Searching..." : nearbyAskState === "loading" ? "Checking..." : "Ask"}
               </button>
             </form>
+            <div className="nearby-sample-queries" aria-label="Sample questions">
+              {SAMPLE_QUESTIONS.map((sample) => (
+                <button
+                  type="button"
+                  key={sample}
+                  onClick={() => {
+                    setNearbyQuestion(sample);
+                    void askNearby(true, sample);
+                  }}
+                  disabled={nearbyAskState === "loading" || isSearching}
+                >
+                  {sample}
+                </button>
+              ))}
+            </div>
             {nearbyAskError && <p className="panel-error">{nearbyAskError}</p>}
             {nearbyAnswer && (
               <div className="nearby-rag-answer">
@@ -925,17 +946,6 @@ export default function Home() {
                       );
                     })}
                   </div>
-                )}
-                {nearbyAnswer.ranking_mode === "allergy_fit" && nearbyAnswer.scan_needed_places.length > 0 &&
-                  !nearbyAnswer.places.some((suggestion) => suggestion.evidence_status === "scan_running") && (
-                  <button
-                    type="button"
-                    className="scan-top-places-button"
-                    disabled={nearbyAskState === "loading"}
-                    onClick={() => void askNearby(true)}
-                  >
-                    {nearbyAskState === "loading" ? "Starting scans..." : "Scan top places"}
-                  </button>
                 )}
                 {nearbyAnswer.ranking_mode === "allergy_fit" &&
                   nearbyAnswer.places.some(hasScannedMenuEvidence) && (

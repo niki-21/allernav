@@ -235,8 +235,8 @@ test("TrustPanel keeps Overview and Menu restaurant fit messaging consistent", (
   assert.ok(source.includes("(restaurantFitScore ?? 0) >= 70"));
   assert.ok(source.includes("(restaurantFitScore ?? 0) >= 45"));
   assert.ok(source.includes("agentRecommendation && !hasRestaurantFit"));
-  assert.ok(source.includes("<strong>Restaurant allergy fit</strong>"));
-  assert.ok(source.includes("{restaurantFitScore}</span>"));
+  assert.ok(source.includes("<strong>Menu evidence fit</strong>"));
+  assert.ok(source.includes("This is not a safety guarantee."));
   assert.ok(source.includes("Some dishes contain your allergens, but many menu items may be possible lower-risk after staff verification."));
 });
 

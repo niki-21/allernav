@@ -165,6 +165,7 @@ class MenuItem(BaseModel):
     description: str | None = None
     price: str | None = None
     confirmed_allergens: list[AllergyTag] = Field(default_factory=list)
+    allergen_codes: list[str] = Field(default_factory=list)
     inferred_risks: list[AllergyTag] = Field(default_factory=list)
     unknowns: list[str] = Field(default_factory=list)
     verification_status: str = "inferred"

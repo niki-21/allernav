@@ -18,6 +18,7 @@ from allernav_api.menu_ingestion import (
     load_place_menu,
     looks_like_real_menu_item,
     parse_menu_html,
+    parse_visible_html_menu,
     parse_menu_document,
     save_menu_source,
     stored_evidence,
@@ -52,6 +53,24 @@ class MenuItemArtifactTests(unittest.TestCase):
     def test_price_allergen_controls_are_not_dishes(self) -> None:
         self.assertFalse(looks_like_real_menu_item("AED 178 Allergens", "fish, soy detected"))
         self.assertFalse(looks_like_real_menu_item("125 Allergens", "soy"))
+
+    def test_khadak_style_allergen_codes_are_kept_out_of_dish_names(self) -> None:
+        sections = parse_visible_html_menu(
+            """
+            <div class="main-dish">
+              <h4>CHICKEN BIRYANI | 78 <small>D, G, E, S</small></h4>
+              <p>Chicken and rice with house spices.</p>
+            </div>
+            """
+        )
+        item = sections[0].items[0]
+        self.assertEqual(item.name, "CHICKEN BIRYANI")
+        self.assertEqual(item.price, "AED 78")
+        self.assertEqual(item.allergen_codes, ["D", "G", "E", "S"])
+        self.assertIn(AllergyTag.SOY, item.confirmed_allergens)
+
+    def test_generic_menu_category_is_not_a_dish(self) -> None:
+        self.assertFalse(looks_like_real_menu_item("Menu category", "Desserts"))
 
 SIMPLE_HTML_MENU = """
 <html>

@@ -112,6 +112,8 @@ export interface MenuItem {
   name: string;
   description?: string | null;
   price?: string | null;
+  confirmed_allergens?: AllergyTag[];
+  allergen_codes?: string[];
   likely_safe_for: AllergyTag[];
   likely_risky_for: AllergyTag[];
   risk_label?: MenuRiskLabel | null;
