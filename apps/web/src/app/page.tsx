@@ -30,6 +30,7 @@ import { applyPlaceDetailError, applyPlaceDetailSuccess, seedPlaceDetailsState }
 import { extractSearchIntent } from "@/lib/searchIntent";
 import type {
   AllergyTag,
+  ConversationTurn,
   AskRestaurantResponse,
   LatLng,
   NearbySuggestionResponse,
@@ -85,13 +86,6 @@ function hasScannedMenuEvidence(suggestion: NearbySuggestionResponse["places"][n
   );
 }
 
-function nearbyAnswerSummary(answer: NearbySuggestionResponse): string {
-  const runningCount = answer.places.filter((suggestion) => suggestion.evidence_status === "scan_running").length;
-  if (runningCount > 0) {
-    return `Scanning menus for ${runningCount} restaurant${runningCount === 1 ? "" : "s"}…`;
-  }
-  return answer.answer;
-}
 
 function menuIsStale(menu: PlaceMenu | null | undefined): boolean {
   if (!menu || !menu.source_fetched_at) {
@@ -105,6 +99,8 @@ export default function Home() {
   const [query, setQuery] = useState(DEFAULT_QUERY);
   const [places, setPlaces] = useState<PlaceSummary[]>([]);
   const [detailStates, setDetailStates] = useState<Record<string, PlaceDetailState>>({});
+  const [mobileView, setMobileView] = useState<"map" | "results">("results");
+  const [chatScope, setChatScope] = useState<"area" | "selected">("area");
   const [selectedPlaceId, setSelectedPlaceId] = useState<string | null>(null);
   const [mapFocusPlaceId, setMapFocusPlaceId] = useState<string | null>(null);
   const [selectedAllergens, setSelectedAllergens] = useState<AllergyTag[]>(DEFAULT_ALLERGENS);
@@ -118,6 +114,7 @@ export default function Home() {
   const [askResponses, setAskResponses] = useState<Record<string, AskRestaurantResponse>>({});
   const [askingPlaceId, setAskingPlaceId] = useState<string | null>(null);
   const [nearbyQuestion, setNearbyQuestion] = useState("Suggest nearby places to evaluate for my allergies");
+  const [nearbyConversation, setNearbyConversation] = useState<ConversationTurn[]>([]);
   const [nearbyAnswer, setNearbyAnswer] = useState<NearbySuggestionResponse | null>(null);
   const [nearbyAskState, setNearbyAskState] = useState<"idle" | "loading" | "error">("idle");
   const [nearbyAskError, setNearbyAskError] = useState<string | null>(null);
@@ -135,6 +132,7 @@ export default function Home() {
   const resetNearbyRag = useCallback(() => {
     nearbyRequestSequence.current += 1;
     setNearbyAnswer(null);
+    setNearbyConversation([]);
     setNearbyAskError(null);
     setNearbyAskState("idle");
   }, []);
@@ -330,8 +328,9 @@ export default function Home() {
         center: [searchCenter.lat.toFixed(5), searchCenter.lng.toFixed(5)],
         places: places.map((place) => [place.id, place.location.lat, place.location.lng]),
         allergens: selectedAllergens,
+        chatPlace: chatScope === "selected" ? selectedPlaceId : null,
       }),
-    [searchCenter.lat, searchCenter.lng, places, query, selectedAllergens],
+    [searchCenter.lat, searchCenter.lng, places, query, selectedAllergens, chatScope, selectedPlaceId],
   );
   const canSearchArea = useMemo(() => shouldShowSearchAreaButton(searchCenter, mapCenter), [mapCenter, searchCenter]);
   useEffect(() => {
@@ -576,14 +575,16 @@ export default function Home() {
   };
 
   const askNearby = async (allowBackgroundScan = false, questionOverride?: string) => {
-    const question = (questionOverride ?? nearbyQuestion).trim();
+    const rawQuestion = (questionOverride ?? nearbyQuestion).trim();
+    const scopedPlace = chatScope === "selected" ? selectedPlace : null;
+    const question = rawQuestion && scopedPlace ? rawQuestion + "\nRestaurant: " + scopedPlace.name : rawQuestion;
     if (!question) {
       return;
     }
     const intentQuery = extractSearchIntent(question, query);
     const intentChanged = intentQuery.toLowerCase() !== (query.trim() || "restaurants").toLowerCase();
     let visiblePlaces = rankedPlaces;
-    if (!areaSearchCompleted || canSearchArea || visiblePlaces.length === 0 || intentChanged) {
+    if (!scopedPlace && (!areaSearchCompleted || canSearchArea || visiblePlaces.length === 0 || intentChanged)) {
       if (intentChanged) {
         setQuery(intentQuery);
       }
@@ -596,6 +597,8 @@ export default function Home() {
       // The search intentionally establishes the new RAG context; the next render should not cancel it.
       nearbyContextRef.current = null;
     }
+    const conversation: ConversationTurn[] = [...nearbyConversation, { role: "user" as const, content: question.slice(0, 2000) }].slice(-9);
+    setNearbyConversation(conversation);
     const requestId = ++nearbyRequestSequence.current;
     setNearbyAskState("loading");
     setNearbyAskError(null);
@@ -618,7 +621,7 @@ export default function Home() {
       });
     }
     try {
-      const candidatePlaces = await resolveNearbyCandidateWebsites(visiblePlaces.slice(0, 8).map((place) => {
+      const candidatePlaces = await resolveNearbyCandidateWebsites((scopedPlace ? [scopedPlace] : visiblePlaces.slice(0, 8)).map((place) => {
         const detailState = detailStates[place.id];
         return {
           ...place,
@@ -636,11 +639,14 @@ export default function Home() {
         candidatePlaces,
         allowBackgroundScan,
         intentQuery,
+        conversation,
       );
       if (requestId !== nearbyRequestSequence.current) {
         return;
       }
       setNearbyAnswer(response);
+      setNearbyConversation([...conversation, { role: "assistant" as const, content: response.answer.slice(0, 2000) }].slice(-10));
+      setNearbyQuestion("");
       const runningScans = response.places.filter(
         (suggestion) => suggestion.evidence_status === "scan_running" && suggestion.scan_job_id,
       );
@@ -776,7 +782,11 @@ export default function Home() {
   };
 
   return (
-    <main className="app-shell">
+    <main className={`app-shell mobile-view-${mobileView}`}>
+      <nav className="mobile-view-toggle" aria-label="Browse restaurants">
+        <button type="button" aria-pressed={mobileView === "map"} onClick={() => setMobileView("map")}>Map</button>
+        <button type="button" aria-pressed={mobileView === "results"} onClick={() => setMobileView("results")}>Results ({rankedPlaces.length})</button>
+      </nav>
       <div className="map-layer">
         <Map
           places={places}
@@ -786,8 +796,8 @@ export default function Home() {
           searchCenter={searchCenter}
           searchTargetPlaceId={searchTargetPlaceId}
           suggestedPlaceIds={(nearbyAnswer?.places ?? []).slice(0, 3).map((suggestion) => suggestion.place.id)}
-          onPlaceSelect={selectPlace}
-          onNativePlaceSelect={selectNativePlace}
+          onPlaceSelect={(id) => { selectPlace(id); setMobileView("results"); }}
+          onNativePlaceSelect={(place) => { void selectNativePlace(place); setMobileView("results"); }}
           onMapCenterChange={(center) => {
             resetNearbyRag();
             setMapCenter(center);
@@ -849,6 +859,26 @@ export default function Home() {
                   : `${Math.min(8, rankedPlaces.length)} search-area candidate${rankedPlaces.length === 1 ? "" : "s"}`}
               </small>
             </div>
+            <label className="chat-scope">Asking about
+              <select value={selectedPlace ? chatScope : "area"} onChange={(event) => {
+                setChatScope(event.target.value as "area" | "selected");
+                resetNearbyRag();
+              }}>
+                <option value="area">Restaurants in this area</option>
+                {selectedPlace && <option value="selected">{selectedPlace.name}</option>}
+              </select>
+            </label>
+            <button type="button" className="chat-follow-up" onClick={() => setNearbyQuestion("What should I ask the staff?")}>What should I ask the staff?</button>
+            {nearbyConversation.length > 0 && (
+              <div className="nearby-conversation" role="log" aria-label="Conversation with AllerNav">
+                {nearbyConversation.map((turn, index) => (
+                  <div key={index} className={`nearby-chat-turn ${turn.role}`}>
+                    <strong>{turn.role === "user" ? "You" : "AllerNav"}</strong>
+                    <p>{turn.content}</p>
+                  </div>
+                ))}
+              </div>
+            )}
             <form
               className="nearby-rag-form"
               onSubmit={(event) => {
@@ -860,7 +890,9 @@ export default function Home() {
                 value={nearbyQuestion}
                 onChange={(event) => setNearbyQuestion(event.target.value)}
                 rows={2}
-                aria-label="Ask AllerNav for nearby restaurant suggestions"
+                aria-label="Ask AllerNav a question"
+                placeholder="Ask a question or follow up…"
+                maxLength={2000}
               />
               <button type="submit" disabled={nearbyAskState === "loading" || isSearching}>
                 {isSearching ? "Searching..." : nearbyAskState === "loading" ? "Checking..." : "Ask"}
@@ -884,7 +916,10 @@ export default function Home() {
             {nearbyAskError && <p className="panel-error">{nearbyAskError}</p>}
             {nearbyAnswer && (
               <div className="nearby-rag-answer">
-                <p>{nearbyAnswerSummary(nearbyAnswer)}</p>
+                {nearbyConversation.length === 0 && <p>{nearbyAnswer.answer}</p>}
+                {nearbyAnswer.places.some((place) => place.evidence_status === "scan_running") && (
+                  <p role="status">Menu scans are running. Results will update here.</p>
+                )}
                 {nearbyAnswer.places.length > 0 && (
                   <div className="nearby-rag-suggestions">
                     {nearbyAnswer.places.slice(0, 3).map((suggestion) => {
@@ -989,7 +1024,11 @@ export default function Home() {
 
           {searchError && <p className="panel-error">{searchError}</p>}
 
-          <div className="results-scroll">
+          {rankedPlaces.length > 0 && <button type="button" className="view-results-button" onClick={() => {
+            setMobileView("results");
+            document.getElementById("restaurant-results")?.scrollIntoView({ behavior: "smooth", block: "start" });
+          }}>View restaurant results ({rankedPlaces.length})</button>}
+          <div className="results-scroll" id="restaurant-results">
             {rankedPlaces.map((place) => (
               <div key={place.id} className="place-card-shell">
                 <PlaceCard
@@ -1012,7 +1051,12 @@ export default function Home() {
 
         {selectedPlaceId && (
         <section className="glass-panel details-panel place-sheet">
+          <button type="button" className="back-to-results" onClick={() => setSelectedPlaceId(null)}>Back to results</button>
           <TrustPanel
+            onChooseAnother={() => {
+              setSelectedPlaceId(null);
+              document.getElementById("restaurant-results")?.scrollIntoView({ behavior: "smooth" });
+            }}
             place={selectedPlace}
             detailState={selectedPlaceId ? detailStates[selectedPlaceId] : undefined}
             askResponse={selectedPlaceId ? askResponses[selectedPlaceId] : null}

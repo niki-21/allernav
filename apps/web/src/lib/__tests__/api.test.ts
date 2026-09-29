@@ -235,7 +235,7 @@ test("TrustPanel keeps Overview and Menu restaurant fit messaging consistent", (
   assert.ok(source.includes("restaurant-fit-badge"));
   assert.ok(source.includes("(restaurantFitScore ?? 0) >= 70"));
   assert.ok(source.includes("(restaurantFitScore ?? 0) >= 45"));
-  assert.ok(source.includes("agentRecommendation && !hasRestaurantFit"));
+  assert.ok(source.includes('menuItemCount > 0 && agentRecommendation && agentRecommendation.overall_risk !== "insufficient_evidence"'));
   assert.ok(source.includes("<strong>Menu evidence fit</strong>"));
   assert.ok(source.includes("This is not a safety guarantee."));
   assert.ok(source.includes("Some dishes contain your allergens, but many menu items may be possible lower-risk after staff verification."));
@@ -365,4 +365,33 @@ test("one failed website lookup does not prevent other nearby menus from scannin
   assert.equal(candidates.length, 2);
   assert.equal(candidates[0].website_url, undefined);
   assert.equal(candidates[1].website_url, "https://available.example");
+});
+
+test("nearby chat includes bounded history without system messages", () => {
+  const turns = Array.from({ length: 12 }, () => ({ role: "user" as const, content: "What about soy?" }));
+  const payload = buildNearbySuggestionPayload("And dairy?", { lat: 25, lng: 55 }, [], [], false, "restaurants", turns);
+  assert.equal(payload.conversation?.length, 10);
+  assert.equal(payload.conversation?.[0].content, "What about soy?");
+});
+
+
+test("menu content excludes deals and non-food without excluding food names", async () => {
+  const { isIndividualFoodItem } = await import("../menuContent.ts");
+  for (const name of ["Papa's Meal for Two", "Party Meal", "Pizza Combo", "View Menu", "Coffee", "Water"]) {
+    assert.equal(isIndividualFoodItem(name), false, name);
+  }
+  for (const name of ["Margherita Pizza", "Coffee Cake", "Beer Battered Fish", "Chicken Biryani"]) {
+    assert.equal(isIndividualFoodItem(name), true, name);
+  }
+});
+
+test("scan progress distinguishes reading, completion and failure", async () => {
+  const { scanProgress } = await import("../scanProgress.ts");
+  assert.equal(scanProgress("discovering").step, 0);
+  assert.equal(scanProgress("ocr_processing").step, 1);
+  assert.equal(scanProgress("normalizing").step, 1);
+  assert.equal(scanProgress("indexing").step, 2);
+  assert.equal(scanProgress("complete").step, 3);
+  assert.equal(scanProgress("failed").step, -1);
+  assert.notEqual(scanProgress("needs_background_refresh").step, 3);
 });

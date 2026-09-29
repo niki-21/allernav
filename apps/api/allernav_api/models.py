@@ -358,7 +358,13 @@ class HybridSearchResponse(BaseModel):
     results: list[HybridSearchResult] = Field(default_factory=list)
 
 
+class ConversationTurn(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=2000)
+
+
 class NearbySuggestionRequest(BaseModel):
+    conversation: list[ConversationTurn] = Field(default_factory=list, max_length=10)
     question: str = "Suggest nearby places to evaluate for my allergy profile."
     query: str = "restaurants"
     center: LatLng | None = None

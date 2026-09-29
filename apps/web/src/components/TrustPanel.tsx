@@ -2,6 +2,10 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 
+import { scanProgress } from "@/lib/scanProgress";
+import { isIndividualFoodItem } from "@/lib/menuContent";
+
+import MenuUpload from "@/components/MenuUpload";
 import { useAuth } from "@/components/AuthProvider";
 import { fetchCommunityReviews, submitCommunityReview } from "@/lib/api";
 
@@ -26,6 +30,7 @@ interface TrustPanelProps {
   isMenuLoading?: boolean;
   menuRefreshJob?: MenuRefreshJob;
   onRefreshMenu: () => void;
+  onChooseAnother: () => void;
 }
 
 type PlaceTab = "summary" | "menu" | "community";
@@ -197,6 +202,7 @@ export default function TrustPanel({
   isMenuLoading = false,
   menuRefreshJob,
   onRefreshMenu,
+  onChooseAnother,
 }: TrustPanelProps) {
   const { session, user, points, signInWithGoogle, refreshPoints } = useAuth();
   const [tabState, setTabState] = useState<{ placeId: string | null; tab: PlaceTab }>({
@@ -265,7 +271,7 @@ export default function TrustPanel({
   const { data } = detailState;
   const activeTab = tabState.placeId === data.id ? tabState.tab : "summary";
   const menuSections = (data.menu?.sections ?? [])
-    .map((section) => ({ ...section, items: section.items.filter((item) => !isMenuDisplayArtifact(item)) }))
+    .map((section) => ({ ...section, items: section.items.filter((item) => !isMenuDisplayArtifact(item) && isIndividualFoodItem(item.name)) }))
     .filter((section) => section.items.length > 0);
   const menuItemCount = menuSections.reduce((count, section) => count + section.items.length, 0);
   const allergyMode = data.selected_allergens.length > 0;
@@ -313,10 +319,10 @@ export default function TrustPanel({
     },
   ];
   const menuBucketCounts = {
-    possible: data.menu?.possible_lower_risk_count ?? possibleMenuItems.length,
-    check: data.menu?.needs_check_count ?? needsCheckMenuItems.length,
-    avoid: data.menu?.avoid_count ?? avoidMenuItems.length,
-    insufficient: data.menu?.insufficient_info_count ?? insufficientMenuItems.length,
+    possible: possibleMenuItems.length,
+    check: needsCheckMenuItems.length,
+    avoid: avoidMenuItems.length,
+    insufficient: insufficientMenuItems.length,
   };
   const restaurantFitScore = data.menu?.restaurant_fit_score ?? data.restaurant_fit_score ?? null;
   const restaurantFitLabel =
@@ -490,8 +496,8 @@ export default function TrustPanel({
       {activeTab === "summary" && (
         <div className="place-tab-panel">
           <div className="overview-line">
-            <strong>{openStatus ?? data.decision_brief.headline}</strong>
-            <p>{data.editorial_summary ?? data.decision_brief.summary}</p>
+            <strong>{openStatus ?? (menuItemCount === 0 ? "Restaurant overview" : data.decision_brief.headline)}</strong>
+            <p>{data.editorial_summary ?? (menuItemCount === 0 ? "Explore this restaurant and scan its menu for dish information." : data.decision_brief.summary)}</p>
           </div>
           {services.length > 0 && (
             <div className="service-chip-row" aria-label="Service options">
@@ -502,8 +508,8 @@ export default function TrustPanel({
           )}
           {allergyMode && !hasRestaurantFit && (
             <div className="overview-line">
-              <strong>Allergy read</strong>
-              <p>{data.decision_brief.summary}</p>
+              <strong>{menuItemCount === 0 ? "Menu not assessed" : "Allergy evidence"}</strong>
+              <p>{menuItemCount === 0 ? "We haven’t assessed a menu for this restaurant yet. No menu-based allergy assessment is available." : data.decision_brief.summary}</p>
             </div>
           )}
           {hasRestaurantFit && (
@@ -512,10 +518,10 @@ export default function TrustPanel({
               <p>{restaurantFitMessage}</p>
             </div>
           )}
-          {allergyMode && agentRecommendation && !hasRestaurantFit && (
+          {allergyMode && menuItemCount > 0 && agentRecommendation && agentRecommendation.overall_risk !== "insufficient_evidence" && !hasRestaurantFit && (
             <div className={`overview-line agent-risk ${agentRecommendation.overall_risk}`}>
               <strong>
-                Agentic risk: {formatRiskLabel(agentRecommendation.overall_risk)} ·{" "}
+                Menu assessment: {formatRiskLabel(agentRecommendation.overall_risk)} ·{" "}
                 {formatRiskLabel(agentRecommendation.recommended_action)}
               </strong>
               <p>{agentRecommendation.summary}</p>
@@ -547,8 +553,29 @@ export default function TrustPanel({
         </div>
       )}
 
+      {menuRefreshJob && (
+        <div className="scan-progress" role="status" aria-live="polite">
+          <strong>{scanProgress(menuRefreshJob.status).label}</strong>
+          <ol aria-label="Menu scan progress">
+            {["Finding menu", "Reading dishes", "Preparing results", "Finished"].map((label, index) => (
+              <li key={label} aria-current={scanProgress(menuRefreshJob.status).step === index ? "step" : undefined}
+                className={scanProgress(menuRefreshJob.status).step >= index ? "reached" : ""}>{label}</li>
+            ))}
+          </ol>
+          {menuItemCount > 0 && <button type="button" onClick={() => {
+            setTabState({ placeId: data.id, tab: "menu" });
+            requestAnimationFrame(() => document.getElementById("menu-results")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+          }}>View menu results</button>}
+          {refreshFailed && <button type="button" onClick={onRefreshMenu}>Retry scan</button>}
+        </div>
+      )}
+
       {activeTab === "menu" && (
-        <div className="place-tab-panel">
+        <div className="place-tab-panel" id="menu-results">
+          {menuItemCount > 0 && <p className="menu-provenance">
+            {(data.menu?.source_url || data.menu?.document_url) && <a href={data.menu.source_url ?? data.menu.document_url ?? ""} target="_blank" rel="noreferrer">Menu source</a>}
+            {" · "}{data.menu?.source_fetched_at ? "Last scanned " + new Date(data.menu.source_fetched_at).toLocaleDateString() : "Scan date unavailable"}
+          </p>}
           {hasRestaurantFit && (
             <div className="menu-fit-summary" aria-label="Restaurant allergy fit summary">
               <span className="menu-primary-status">Menu found</span>
@@ -619,8 +646,16 @@ export default function TrustPanel({
                           <div className="menu-item-heading">
                             <strong>{displayDishName(item.name)}</strong>
                           </div>
+                          <details className="dish-evidence">
+                            <summary>Why this label?</summary>
+                            {item.description && <p>{item.description}</p>}
+                            <p>{verification.detail}</p>
+                            {(item.risk_reasons ?? []).map((reason) => <p key={reason}>{reason}</p>)}
+                            <p>{item.verification_question || "Ask staff to confirm ingredients, sauces, and shared preparation."}</p>
+                            {item.source_url && <a href={item.source_url} target="_blank" rel="noreferrer">Dish source</a>}
+                          </details>
                         </div>
-                        {item.price && <span className="menu-price">{item.price}</span>}
+                        <span className="menu-price">{item.price || "Price not listed"}</span>
                       </article>
                     );
                     })}
@@ -664,7 +699,7 @@ export default function TrustPanel({
                           <strong>{displayDishName(item.name)}</strong>
                         </div>
                       </div>
-                      {item.price && <span className="menu-price">{item.price}</span>}
+                      <span className="menu-price">{item.price || "Price not listed"}</span>
                     </article>
                   ))}
                 </section>
@@ -691,6 +726,13 @@ export default function TrustPanel({
                 Retry menu scan
               </button>
             </article>
+          )}
+
+          {menuItemCount === 0 && !refreshPending && (
+            <div className="empty-menu-actions">
+              <MenuUpload key={data.id} />
+              <button type="button" onClick={onChooseAnother}>Choose another restaurant</button>
+            </div>
           )}
 
           {(isMenuLoading || menuRefreshJob || menuItemCount > 0) && (

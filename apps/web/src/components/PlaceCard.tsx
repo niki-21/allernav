@@ -1,3 +1,5 @@
+import { isIndividualFoodItem } from "@/lib/menuContent";
+
 import { forwardRef } from "react";
 
 import type { PlaceDetailState, PlaceSummary } from "@/lib/types";
@@ -25,7 +27,7 @@ const PlaceCard = forwardRef<HTMLButtonElement, PlaceCardProps>(function PlaceCa
 ) {
   const isReady = detailState?.status === "ready";
   const displayPlace = isReady ? detailState.data : place;
-  const menuItems = isReady ? detailState.data.menu?.sections.flatMap((section) => section.items) ?? [] : [];
+  const menuItems = isReady ? detailState.data.menu?.sections.flatMap((section) => section.items).filter((item) => isIndividualFoodItem(item.name)) ?? [] : [];
 
   return (
     <button ref={ref} type="button" className={`place-card ${selected ? "selected" : ""}`} onClick={onSelect}>

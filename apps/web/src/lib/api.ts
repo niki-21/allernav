@@ -3,6 +3,7 @@ import type {
   AllergyTag,
   AskRestaurantResponse,
   CommunityReview,
+  ConversationTurn,
   LatLng,
   MenuRefreshJob,
   NearbySuggestionResponse,
@@ -101,10 +102,12 @@ export function buildNearbySuggestionPayload(
   candidatePlaces: PlaceSummary[],
   allowBackgroundScan = false,
   searchQuery = question,
+  conversation: ConversationTurn[] = [],
 ) {
   const candidates = candidatePlaces.slice(0, 8);
   return {
     question,
+    ...(conversation.length ? { conversation: conversation.slice(-10).map((turn) => ({ ...turn, content: turn.content.slice(0, 2000) })) } : {}),
     query: searchQuery,
     center,
     allergens,
@@ -266,6 +269,7 @@ export async function askNearbyPlaces(
   candidatePlaces: PlaceSummary[],
   allowBackgroundScan = false,
   searchQuery = question,
+  conversation: ConversationTurn[] = [],
 ): Promise<NearbySuggestionResponse> {
   const response = await fetch(`${API_PREFIX}/rag/nearby-suggestions`, {
     method: "POST",
@@ -273,7 +277,7 @@ export async function askNearbyPlaces(
       "Content-Type": "application/json",
     },
     body: JSON.stringify(
-      buildNearbySuggestionPayload(question, center, allergens, candidatePlaces, allowBackgroundScan, searchQuery),
+      buildNearbySuggestionPayload(question, center, allergens, candidatePlaces, allowBackgroundScan, searchQuery, conversation),
     ),
   });
   if (!response.ok) {

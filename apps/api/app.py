@@ -7,6 +7,7 @@ from uuid import uuid4
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
+from allernav_api.menu_upload import upload_menu_endpoint
 from allernav_api.google_places import GooglePlacesClient, GooglePlacesError
 from allernav_api.models import (
     AllergyProfile,
@@ -84,6 +85,8 @@ def allowed_origins() -> list[str]:
 
 
 app = FastAPI(title="Allernav API")
+
+app.add_api_route("/api/menu-upload", upload_menu_endpoint, methods=["POST"])
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins(),

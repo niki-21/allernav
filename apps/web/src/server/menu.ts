@@ -1,3 +1,4 @@
+import { isIndividualFoodItem } from "../lib/menuContent.ts";
 import type { MenuItem, MenuSection, PlaceMenu } from "../lib/types.ts";
 
 const menuCache = new Map<string, PlaceMenu | null>();
@@ -74,7 +75,7 @@ function sanitizeSections(sections: MenuSection[]): MenuSection[] {
     .map((section) => ({
       ...section,
       items: uniqueByName(
-        section.items.filter((item) => looksLikeRealMenuItem(item.name, item.description)).slice(0, 20),
+        section.items.filter((item) => isIndividualFoodItem(item.name) && looksLikeRealMenuItem(item.name, item.description)).slice(0, 20),
       ),
     }))
     .filter((section) => section.items.length > 0);

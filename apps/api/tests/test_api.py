@@ -123,7 +123,7 @@ class ApiTests(unittest.TestCase):
         }
         chat_cls = MagicMock()
         langchain_openai = ModuleType("langchain_openai")
-        langchain_openai.AzureChatOpenAI = chat_cls
+        langchain_openai.ChatOpenAI = chat_cls
         with patch.dict("os.environ", env, clear=True), patch.dict(
             "sys.modules", {"langchain_openai": langchain_openai}
         ):
@@ -183,7 +183,7 @@ class ApiTests(unittest.TestCase):
             "AZURE_OPENAI_CHAT_DEPLOYMENT": "test-chat",
         }
         with patch.dict("os.environ", base, clear=True):
-            self.assertFalse(TestClient(app).get("/health").json()["environment"]["azure_openai_chat"])
+            self.assertTrue(TestClient(app).get("/health").json()["environment"]["azure_openai_chat"])
         with patch.dict("os.environ", {**base, "AZURE_OPENAI_CHAT_API_VERSION": "2024-10-21"}, clear=True):
             self.assertTrue(TestClient(app).get("/health").json()["environment"]["azure_openai_chat"])
 

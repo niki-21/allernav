@@ -1,3 +1,5 @@
+export interface ConversationTurn { role: "user" | "assistant"; content: string; }
+
 export type AllergyTag =
   | "peanut"
   | "tree_nut"

@@ -1837,6 +1837,8 @@ def looks_like_non_dish_marketing_text(name: str, description: str | None = None
 
 def looks_like_meal_deal_or_promo(name: str, description: str | None = None) -> bool:
     normalized_name = name.lower()
+    if re.search(r"\b(meals?|combos?|bundles?|deals?|offers?|vouchers?)\b", normalized_name):
+        return True
     text = f"{name} {description or ''}".lower()
     tokens = set(re.split(r"[^a-z0-9]+", text))
     has_price = bool(re.search(r"\$\d|\b\d{1,3}\.\d{2}\b", text))
