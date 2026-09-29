@@ -887,7 +887,7 @@ class ApiTests(unittest.TestCase):
             response = asyncio.run(suggest_nearby_places_service(payload))
 
         self.assertEqual(create_job.await_count, 2)
-        self.assertTrue(all(call.kwargs["allow_local_fallback"] for call in create_job.await_args_list))
+        self.assertTrue(all(call.kwargs["allow_local_fallback"] is False for call in create_job.await_args_list))
         self.assertEqual(sum(item.evidence_status == "scan_running" for item in response.places), 2)
         self.assertEqual(sum(item.evidence_status == "scan_needed" for item in response.places), 1)
         self.assertEqual(response.scan_job_ids, ["job-0", "job-1"])

@@ -391,7 +391,9 @@ async def start_background_scans(
                 suggestion.place.id,
                 restaurant_name=suggestion.place.name,
                 website_url=suggestion.place.website_url,
-                allow_local_fallback=True,
+                # Nearby comparisons must return pollable jobs promptly. Inline
+                # discovery can consume the entire HTTP budget per restaurant.
+                allow_local_fallback=False,
             )
         except Exception as exc:  # Keep one provider failure from failing the whole nearby request.
             return exc
