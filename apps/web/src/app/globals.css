@@ -3005,3 +3005,26 @@ body {
     padding-left: 16px;
   }
 }
+
+.place-card-menu {
+  display: grid;
+  gap: 7px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #e5e7eb;
+  text-align: left;
+}
+.place-card-menu-label, .place-card-menu-note {
+  font-size: 12px;
+  color: #5d6470;
+}
+.place-card-menu-label { font-weight: 650; }
+.place-card-menu-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 14px;
+  line-height: 1.4;
+}
+.place-card-menu-row > span:first-child { overflow-wrap: anywhere; }
+.place-card-menu-price { flex-shrink: 0; font-variant-numeric: tabular-nums; }

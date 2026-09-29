@@ -14,6 +14,7 @@ from typing import Any
 from urllib import error, parse, request
 
 from . import supabase_store
+from .firecrawl_menu import collect_firecrawl_menu, firecrawl_configured
 from .apify_menu_discovery import (
     ApifyMenuDiscoveryError,
     RenderedMenuDiscovery,
@@ -544,6 +545,25 @@ def _ingest_menu_from_website(
     deep_scan: bool = False,
 ) -> MenuSource:
     fetcher = fetch_html or fetch_html_url
+    # Managed collection belongs in background scans, never the interactive search.
+    if deep_scan and not fast_only and firecrawl_configured():
+        try:
+            managed_source = collect_firecrawl_menu(website_url, restaurant_id=restaurant_id)
+        except Exception:
+            # Provider/model errors may contain credentials or response content.
+            managed_source = None
+        if managed_source:
+            managed_source.sections = sanitize_sections(managed_source.sections, max_sections=24, max_items_per_section=100)
+        count = menu_source_item_count(managed_source)
+        append_trace_step(
+            trace, step_id="firecrawl_menu", label="Collect website menu",
+            status="complete" if count else "failed", provider="firecrawl_azure_openai",
+            detail=f"Extracted {count} source-grounded dishes." if count else "Managed collection produced no usable dishes; trying existing menu sources.",
+            source_url=website_url, item_count=count,
+        )
+        if managed_source and count:
+            save_menu_source(restaurant_id=restaurant_id, restaurant_name=restaurant_name, source=managed_source, db_path=db_path)
+            return managed_source
     document_client = AzureDocumentIntelligenceClient()
     document_extractor = extract_document or document_client.extract_from_url
     byte_extractor = extract_bytes or (

@@ -1,0 +1,22 @@
+[
+  {"id":"3fils-dubai","name":"3Fils — Jumeirah Fishing Harbour","url":"https://www.3fils.com/menu"},
+  {"id":"lpm-dubai","name":"LPM — DIFC","url":"https://lpmrestaurants.com/dubai/menus/la-carte/"},
+  {"id":"gazebo-uae","name":"Gazebo — UAE shared menu","url":"https://www.gazebo.ae/menu/"},
+  {"id":"arabian-tea-house-mercato","name":"Arabian Tea House — Mercato","url":"https://arabianteahouse.com/mercato-mall/"},
+  {"id":"21grams-dubai","name":"21grams — Dubai","url":"https://21grams.me/our-food/"},
+  {"id":"al-beiruti-uae","name":"Al Beiruti — UAE shared menu","url":"https://www.albeiruti.com/menu/uae"},
+  {"id":"pickl-uae","name":"Pickl — UAE shared menu","url":"https://eatpickl.com/menu/"},
+  {"id":"pitfire-dubai","name":"Pitfire Pizza — Dubai menu hub","url":"https://pitfirepizzabakers.com/menu/"},
+  {"id":"bait-maryam-jlt","name":"Bait Maryam — JLT","url":"https://baitmaryam.com/"},
+  {"id":"kinoya-dubai","name":"Kinoya — The Greens","url":"https://kinoya.com/"},
+  {"id":"reif-dar-wasl","name":"REIF Japanese Kushiyaki — Dar Wasl","url":"https://www.reifkushiyaki.com/dar-wasl"},
+  {"id":"reif-dubai-hills","name":"REIF Japanese Kushiyaki — Dubai Hills","url":"https://www.reifkushiyaki.com/dubai-hills"},
+  {"id":"vietnamese-foodies-downtown","name":"Vietnamese Foodies — Downtown","url":"https://vietnamesefoodies.com/downtown-dubai/"},
+  {"id":"wokyo-dubai","name":"Wokyo — Dubai menu","url":"https://www.wokyo.com/menu-2/"},
+  {"id":"celavi-dubai","name":"CÉ LA VI — Address Sky View","url":"https://dxb.celavi.com/"},
+  {"id":"woohoo-dubai","name":"Woohoo — Downtown Dubai","url":"https://woohoo.restaurant/"},
+  {"id":"gaia-dubai","name":"GAIA — DIFC","url":"https://gaia-restaurants.com/dubai-restaurant/gaia-dubai-menus"},
+  {"id":"zuma-dubai","name":"Zuma — DIFC","url":"https://www.zumarestaurant.com/en/dubai"},
+  {"id":"cafe-isan-jlt","name":"Café Isan — JLT","url":"https://www.cafeisan.co/thai-restaurant-armada-avenue-hotel-jlt-location"},
+  {"id":"allo-beirut-uae","name":"Allo Beirut — UAE shared menu","url":"https://www.allobeirutstreetfood.com/"}
+]

@@ -60,11 +60,11 @@ This is a bounded orchestration workflow with fixed edges. Some named stages cur
 
 ### Menu ingestion and document understanding
 
-[`menu_ingestion.py`](apps/api/allernav_api/menu_ingestion.py) discovers menu links through restaurant pages, common menu paths, sitemaps, and HTML/JSON-LD parsing. Optional Google Programmable Search or SerpAPI discovery and Apify Playwright rendering extend coverage when static pages are insufficient.
+[`menu_ingestion.py`](apps/api/allernav_api/menu_ingestion.py) discovers menu links through restaurant pages, common menu paths, sitemaps, and HTML/JSON-LD parsing. Optional Google Programmable Search or SerpAPI discovery and Apify Playwright rendering extend coverage when static pages are insufficient. Deep background scans can use **Firecrawl** to collect restaurant website content, followed by Azure OpenAI structured dish extraction with source checks. Provider failures fall back to the existing ingestion pipeline; search results preview collected dish names and available prices.
 
 **Azure Document Intelligence** extracts text from PDF and image menus. The pipeline retains source URLs, timestamps, extraction methods, and available OCR confidence. Parsing filters out navigation, promotional text, and other non-dish content. Tests also cover Arabic menu text and allergen aliases.
 
-The durable image-menu worker uses **LangChain with Azure OpenAI structured output** to normalize English OCR into validated dish records, checking names, descriptions, and prices against the source text. That normalization path is English-only and does not translate menus. Squarespace discovery can select the newest complete numbered image edition.
+The durable image-menu worker uses **LangChain with Azure OpenAI structured output** to normalize English OCR into validated dish records, checking names, descriptions, and prices against the source text. That normalization path is English-only and does not translate menus. Squarespace discovery can select the newest complete numbered image edition. The [menu benchmark](docs/menu-benchmark.md) provides a fixed 20-restaurant candidate set and an opt-in live runner; candidates are not claimed as verified successes until extraction and manual review pass.
 
 ### RAG and Azure AI Search
 

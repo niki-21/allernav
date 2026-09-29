@@ -25,6 +25,7 @@ const PlaceCard = forwardRef<HTMLButtonElement, PlaceCardProps>(function PlaceCa
 ) {
   const isReady = detailState?.status === "ready";
   const displayPlace = isReady ? detailState.data : place;
+  const menuItems = isReady ? detailState.data.menu?.sections.flatMap((section) => section.items) ?? [] : [];
 
   return (
     <button ref={ref} type="button" className={`place-card ${selected ? "selected" : ""}`} onClick={onSelect}>
@@ -32,6 +33,19 @@ const PlaceCard = forwardRef<HTMLButtonElement, PlaceCardProps>(function PlaceCa
       <p className="place-card-address">{displayPlace.address ?? "Address unavailable"}</p>
 
       <p className="place-card-meta">{formatRating(displayPlace.rating, displayPlace.user_rating_count)}</p>
+
+      {menuItems.length > 0 && (
+        <span className="place-card-menu">
+          <span className="place-card-menu-label">Menu preview · {menuItems.length} items</span>
+          {menuItems.slice(0, 3).map((item, index) => (
+            <span className="place-card-menu-row" key={`${item.name}-${index}`}>
+              <span>{item.name}</span>
+              {item.price && <span className="place-card-menu-price">{item.price}</span>}
+            </span>
+          ))}
+          <span className="place-card-menu-note">View menu and allergy evidence</span>
+        </span>
+      )}
 
       {detailState?.status === "error" && <p className="place-card-error">Details unavailable right now.</p>}
 

@@ -4,11 +4,29 @@ import unittest
 from unittest.mock import patch
 
 from allernav_api.azure_search import build_index_documents
-from allernav_api.menu_normalization import extract_english_menu_page
+from allernav_api.menu_normalization import _price_grounded, extract_english_menu_page
 from allernav_api.models import MenuSource, SourceType
 
 
 class MenuNormalizationTests(unittest.TestCase):
+    def test_price_requires_a_complete_number_not_a_substring(self) -> None:
+        self.assertFalse(_price_grounded("AED 40", "Chicken Curry AED 140"))
+        self.assertFalse(_price_grounded("AED 123", "Rice 12\nSoup 3"))
+        self.assertTrue(_price_grounded("AED 40", "Chicken Curry AED 40"))
+
+    def test_website_text_uses_same_grounding_and_keeps_missing_prices_absent(self) -> None:
+        sections = extract_english_menu_page(
+            ocr_text="Chicken Curry - chicken with coconut sauce",
+            source_url="https://restaurant.example/menu", source_page=1, ocr_confidence=None,
+            source_kind="website text",
+            invoker=lambda messages: {"sections": [{"title": "Mains", "items": [
+                {"name": "Chicken Curry", "description": "chicken with coconut sauce", "price": None},
+                {"name": "Invented Fish", "price": "AED 99"},
+            ]}]},
+        )
+        self.assertEqual([item.name for item in sections[0].items], ["Chicken Curry"])
+        self.assertIsNone(sections[0].items[0].price)
+
     def test_keeps_only_english_ocr_grounded_dishes(self) -> None:
         ocr = """
         APPETIZERS
