@@ -177,6 +177,7 @@ function parsePlaceSummary(place: GooglePlacesApiPlace): PlaceSummary {
     rating: place.rating ?? null,
     user_rating_count: place.userRatingCount ?? null,
     primary_type: place.primaryType ?? null,
+    website_url: place.websiteUri ?? null,
   };
 }
 
@@ -273,6 +274,7 @@ export class GooglePlacesClient {
       "places.rating",
       "places.userRatingCount",
       "places.primaryType",
+      "places.websiteUri",
     ].join(",");
 
     const payload = await requestJson<{ places?: GooglePlacesApiPlace[] }>(endpoint, {

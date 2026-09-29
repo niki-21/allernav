@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { getPlaceDetailsService, searchPlacesService } from "../service.ts";
+import { GooglePlacesClient } from "../googlePlaces.ts";
 import { normalizeApifyReviews } from "../apifyReviews.ts";
 import { normalizeBackendMenu } from "../fastapi.ts";
 import { getCommunityReviews, saveCommunityReview } from "../platform.ts";
@@ -328,4 +329,20 @@ test("community reviews can be saved with local fallback points", async () => {
   assert.equal(result.total_points, 12);
   assert.equal(reviews[0]?.body, "Staff checked fish and soy ingredients and explained prep clearly.");
   assert.deepEqual(reviews[0]?.allergens, ["fish", "soy"]);
+});
+
+
+test("search results carry official websites so menus can scan without opening each place", async (t) => {
+  const previousKey = process.env.GOOGLE_PLACES_API_KEY;
+  process.env.GOOGLE_PLACES_API_KEY = "test-only";
+  t.after(() => {
+    if (previousKey === undefined) delete process.env.GOOGLE_PLACES_API_KEY;
+    else process.env.GOOGLE_PLACES_API_KEY = previousKey;
+  });
+  t.mock.method(globalThis, "fetch", async (_input: string, init: RequestInit) => {
+    assert.match(new Headers(init.headers).get("X-Goog-FieldMask") ?? "", /places.websiteUri/);
+    return Response.json({ places: [{ id: "auto-scan", location: { latitude: 0, longitude: 0 }, displayName: { text: "Cafe" }, websiteUri: "https://cafe.example/menu" }] });
+  });
+  const places = await new GooglePlacesClient().searchPlaces("restaurants", { lat: 0, lng: 0 });
+  assert.equal(places[0].website_url, "https://cafe.example/menu");
 });

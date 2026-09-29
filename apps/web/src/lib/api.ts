@@ -76,6 +76,24 @@ export function buildMenuRefreshPayload(context: {
   };
 }
 
+// Search results may arrive before their place details. Resolve official sites
+// before asking the backend to scan; a missing URL makes a candidate ineligible.
+export async function resolveNearbyCandidateWebsites(
+  places: PlaceSummary[],
+  allergens: AllergyTag[],
+): Promise<PlaceSummary[]> {
+  return Promise.all(places.map(async (place) => {
+    if (place.website_url) return place;
+    try {
+      const details = await fetchPlaceDetails(place.id, allergens, AbortSignal.timeout(15_000));
+      return { ...place, name: details.name || place.name, website_url: details.website_uri };
+    } catch {
+      // One unavailable listing must not prevent other restaurants from scanning.
+      return place;
+    }
+  }));
+}
+
 export function buildNearbySuggestionPayload(
   question: string,
   center: LatLng,
@@ -121,8 +139,8 @@ export async function searchPlaces(query: string, center: LatLng, allergens: All
   return (await response.json()) as SearchResponse;
 }
 
-export async function fetchPlaceDetails(placeId: string, allergens: AllergyTag[]): Promise<PlaceDetailsResponse> {
-  const response = await fetch(buildPlaceDetailsUrl(placeId, allergens));
+export async function fetchPlaceDetails(placeId: string, allergens: AllergyTag[], signal?: AbortSignal): Promise<PlaceDetailsResponse> {
+  const response = await fetch(buildPlaceDetailsUrl(placeId, allergens), { signal });
   if (!response.ok) {
     throw new Error(await response.text());
   }

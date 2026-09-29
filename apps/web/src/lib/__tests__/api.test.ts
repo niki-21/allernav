@@ -9,6 +9,7 @@ import {
   buildSearchPayload,
   menuScanErrorMessage,
   nearbyRagErrorMessage,
+  resolveNearbyCandidateWebsites,
 } from "../api.ts";
 import { extractSearchIntent } from "../searchIntent.ts";
 
@@ -331,4 +332,37 @@ test("nearbyRagErrorMessage converts aborts and raw responses to product copy", 
     nearbyRagErrorMessage('{"detail":"upstream failed"}'),
     "Nearby suggestions are temporarily unavailable. Try again shortly.",
   );
+});
+
+
+test("nearby scans resolve official websites before details have hydrated", async (t) => {
+  const requests: string[] = [];
+  t.mock.method(globalThis, "fetch", async (input: string) => {
+    requests.push(input);
+    return Response.json({ id: "pending", name: "Restaurant", website_uri: "https://menu.example" });
+  });
+  const candidates = await resolveNearbyCandidateWebsites([
+    { id: "pending", name: "Restaurant", location: { lat: 0, lng: 0 } },
+    { id: "known", name: "Known", location: { lat: 0, lng: 0 }, website_url: "https://known.example" },
+  ], ["fish"]);
+  assert.equal(requests.length, 1);
+  assert.match(requests[0], /pending/);
+  assert.equal(candidates[0].website_url, "https://menu.example");
+  assert.equal(candidates[1].website_url, "https://known.example");
+  assert.equal(buildNearbySuggestionPayload("Scan menus", { lat: 0, lng: 0 }, ["fish"], candidates, true)
+    .candidate_places[0].website_url, "https://menu.example");
+});
+
+test("one failed website lookup does not prevent other nearby menus from scanning", async (t) => {
+  t.mock.method(globalThis, "fetch", async (input: string) => {
+    if (input.includes("unavailable")) throw new Error("Unavailable");
+    return Response.json({ name: "Available", website_uri: "https://available.example" });
+  });
+  const candidates = await resolveNearbyCandidateWebsites([
+    { id: "unavailable", name: "Unavailable", location: { lat: 0, lng: 0 } },
+    { id: "available", name: "Available", location: { lat: 0, lng: 0 } },
+  ], ["soy"]);
+  assert.equal(candidates.length, 2);
+  assert.equal(candidates[0].website_url, undefined);
+  assert.equal(candidates[1].website_url, "https://available.example");
 });

@@ -22,6 +22,7 @@ import {
   menuScanErrorMessage,
   nearbyRagErrorMessage,
   refreshPlaceMenu,
+  resolveNearbyCandidateWebsites,
   searchPlaces,
 } from "@/lib/api";
 import { rankPlaces, shouldShowSearchAreaButton } from "@/lib/placeRanking";
@@ -326,12 +327,11 @@ export default function Home() {
     () =>
       JSON.stringify({
         query: query.trim().toLowerCase(),
-        center: [mapCenter.lat.toFixed(5), mapCenter.lng.toFixed(5)],
+        center: [searchCenter.lat.toFixed(5), searchCenter.lng.toFixed(5)],
         places: places.map((place) => [place.id, place.location.lat, place.location.lng]),
-        selectedPlaceId,
         allergens: selectedAllergens,
       }),
-    [mapCenter.lat, mapCenter.lng, places, query, selectedAllergens, selectedPlaceId],
+    [searchCenter.lat, searchCenter.lng, places, query, selectedAllergens],
   );
   const canSearchArea = useMemo(() => shouldShowSearchAreaButton(searchCenter, mapCenter), [mapCenter, searchCenter]);
   useEffect(() => {
@@ -452,7 +452,7 @@ export default function Home() {
   }, [hydratePlaces, places, profileReady, selectedAllergens, selectedAllergenKey]);
 
   useEffect(() => {
-    if (!selectedPlaceId) {
+    if (!selectedPlaceId || isSearching || nearbyAskState === "loading") {
       return;
     }
 
@@ -465,7 +465,7 @@ export default function Home() {
     const menuItemCount =
       details.menu?.sections.reduce((count, section) => count + section.items.length, 0) ?? 0;
 
-    if ((!details.menu || menuIsStale(details.menu)) && details.website_uri && !menuRefreshAttempts.current.has(details.id)) {
+    if ((!details.menu || menuItemCount === 0 || menuIsStale(details.menu)) && details.website_uri && !menuRefreshAttempts.current.has(details.id)) {
       menuRefreshAttempts.current.add(details.id);
       void runMenuRefresh(details, false);
       return;
@@ -509,7 +509,7 @@ export default function Home() {
         // If FastAPI or LangSmith tracing is not configured, the place panel should still work.
       }
     })();
-  }, [detailStates, runMenuRefresh, selectedAllergens, selectedAllergenKey, selectedPlaceId]);
+  }, [detailStates, isSearching, nearbyAskState, runMenuRefresh, selectedAllergens, selectedAllergenKey, selectedPlaceId]);
 
   const toggleAllergen = (allergen: AllergyTag) => {
     resetNearbyRag();
@@ -522,7 +522,6 @@ export default function Home() {
   };
 
   const selectPlace = (placeId: string | null) => {
-    resetNearbyRag();
     setSelectedPlaceId(placeId);
     setMapFocusPlaceId(placeId);
   };
@@ -619,14 +618,17 @@ export default function Home() {
       });
     }
     try {
-      const candidatePlaces = visiblePlaces.slice(0, 8).map((place) => {
+      const candidatePlaces = await resolveNearbyCandidateWebsites(visiblePlaces.slice(0, 8).map((place) => {
         const detailState = detailStates[place.id];
         return {
           ...place,
           name: candidateName(detailState?.status === "ready" ? detailState.data.name : place.name),
-          website_url: detailState?.status === "ready" ? detailState.data.website_uri : null,
+          website_url: detailState?.status === "ready" ? detailState.data.website_uri : place.website_url,
         };
-      });
+      }), selectedAllergens);
+      if (requestId !== nearbyRequestSequence.current) {
+        return;
+      }
       const response = await askNearbyPlaces(
         question,
         mapCenter,
@@ -642,6 +644,7 @@ export default function Home() {
       const runningScans = response.places.filter(
         (suggestion) => suggestion.evidence_status === "scan_running" && suggestion.scan_job_id,
       );
+      runningScans.forEach((suggestion) => menuRefreshAttempts.current.add(suggestion.place.id));
       if (allowBackgroundScan && runningScans.length > 0) {
         void (async () => {
           const terminalStatuses = new Set(["complete", "failed", "needs_background_refresh"]);

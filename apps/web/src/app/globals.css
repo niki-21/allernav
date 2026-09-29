@@ -204,6 +204,20 @@ textarea {
   padding-right: 8px;
 }
 
+/* Keep filters, answers, and restaurant cards in one reachable scroll area. */
+.results-panel > * {
+  flex-shrink: 0;
+}
+
+.results-panel .results-scroll {
+  overflow: visible;
+}
+
+.results-panel {
+  overscroll-behavior-y: contain;
+  scrollbar-gutter: stable;
+}
+
 .details-panel {
   grid-column: 3;
 }
@@ -2965,6 +2979,7 @@ body {
 
   .side-panels {
     inset: auto;
+    grid-template-columns: minmax(0, 1fr);
     padding: 132px 16px 16px;
   }
 }
