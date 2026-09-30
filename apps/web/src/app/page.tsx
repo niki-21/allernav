@@ -855,16 +855,6 @@ export default function Home() {
                   : `${Math.min(8, rankedPlaces.length)} search-area candidate${rankedPlaces.length === 1 ? "" : "s"}`}
               </small>
             </div>
-            {nearbyConversation.length > 0 && (
-              <div className="nearby-conversation" role="log" aria-label="Conversation with AllerNav">
-                {nearbyConversation.map((turn, index) => (
-                  <div key={index} className={`nearby-chat-turn ${turn.role}`}>
-                    <strong>{turn.role === "user" ? "You" : "AllerNav"}</strong>
-                    <p>{turn.content}</p>
-                  </div>
-                ))}
-              </div>
-            )}
             <form
               className="nearby-rag-form"
               onSubmit={(event) => {
@@ -884,128 +874,17 @@ export default function Home() {
                 {isSearching ? "Searching..." : nearbyAskState === "loading" ? "Checking..." : "Ask"}
               </button>
             </form>
-            <div className="nearby-sample-queries" aria-label="Sample questions">
-              {SAMPLE_QUESTIONS.map((sample) => (
-                <button
-                  type="button"
-                  key={sample}
-                  onClick={() => {
-                    setNearbyQuestion(sample);
-                    void askNearby(true, sample);
-                  }}
-                  disabled={nearbyAskState === "loading" || isSearching}
-                >
-                  {sample}
-                </button>
-              ))}
-            </div>
-            {nearbyAskError && <p className="panel-error">{nearbyAskError}</p>}
-            {nearbyAnswer && (
-              <div className="nearby-rag-answer">
-                {nearbyConversation.length === 0 && <p>{nearbyAnswer.answer}</p>}
-                {nearbyAnswer.places.some((place) => place.evidence_status === "scan_running") && (
-                  <p role="status">Menu scans are running. Results will update here.</p>
-                )}
-                {nearbyAnswer.places.length > 0 && (
-                  <div className="nearby-rag-suggestions">
-                    {nearbyAnswer.places.slice(0, 3).map((suggestion) => {
-                      const generalMode = nearbyAnswer.ranking_mode === "general_discovery";
-                      const showScore = !generalMode && hasScannedMenuEvidence(suggestion);
-                      const possibleItemNames = suggestion.possible_item_names ?? [];
-                      const avoidItemNames = suggestion.avoid_item_names ?? [];
-                      const scoreTone = showScore
-                        ? suggestion.restaurant_fit_score! >= 70
-                          ? "good"
-                          : suggestion.restaurant_fit_score! >= 45
-                            ? "caution"
-                            : "risk"
-                        : "";
-                      return (
-                        <button
-                          type="button"
-                          key={suggestion.place.id}
-                          onClick={() => selectPlace(suggestion.place.id)}
-                          className="nearby-rag-chip"
-                        >
-                          <span className="nearby-rag-card-title">
-                            <strong>{suggestion.place.name}</strong>
-                            {showScore && (
-                              <b className={`nearby-score-badge ${scoreTone}`}>{suggestion.restaurant_fit_score}</b>
-                            )}
-                            {generalMode && suggestion.place.rating != null && (
-                              <b className="nearby-rating-badge">{suggestion.place.rating.toFixed(1)}★</b>
-                            )}
-                          </span>
-                          <span className="nearby-rag-card-meta">
-                            <b>
-                              {generalMode
-                                ? suggestion.general_match_label ?? "Nearby restaurant option"
-                                : showScore
-                                  ? suggestion.restaurant_fit_label
-                                  : nearbyEvidenceStatus(suggestion.evidence_status)}
-                            </b>
-                          </span>
-                          {showScore && <small>{nearbyBucketSummary(suggestion)}</small>}
-                          {showScore && (
-                            <span className="nearby-rag-menu-preview">
-                              <small>
-                                <b>Good to ask about:</b>{" "}
-                                {possibleItemNames.length > 0
-                                  ? possibleItemNames.join(", ")
-                                  : "No clear options found yet"}
-                              </small>
-                              <small>
-                                <b>Avoid found:</b>{" "}
-                                {avoidItemNames.length > 0
-                                  ? avoidItemNames.join(", ")
-                                  : "none"}
-                              </small>
-                            </span>
-                          )}
-                          {suggestion.intent_match === false && suggestion.intent_note && (
-                            <small className="nearby-intent-mismatch">{suggestion.intent_note}</small>
-                          )}
-                          {generalMode && <small>{suggestion.reason}</small>}
-                        </button>
-                      );
-                    })}
+            {nearbyConversation.length > 0 && (
+              <div className="nearby-conversation" role="log" aria-label="Conversation with AllerNav">
+                {nearbyConversation.map((turn, index) => (
+                  <div key={index} className={`nearby-chat-turn ${turn.role}`}>
+                    <strong>{turn.role === "user" ? "You" : "AllerNav"}</strong>
+                    <p>{turn.content}</p>
                   </div>
-                )}
-                {nearbyAnswer.ranking_mode === "allergy_fit" &&
-                  nearbyAnswer.places.some(hasScannedMenuEvidence) && (
-                    <p className="nearby-rag-next-action">
-                      Ask staff about sauces, broths, and shared prep before ordering.
-                    </p>
-                  )}
-                {nearbyAnswer.recommended_questions.length > 0 && (
-                  <details className="nearby-rag-details">
-                    <summary>Staff questions</summary>
-                    <ul>
-                      {nearbyAnswer.recommended_questions.slice(0, 3).map((question) => (
-                        <li key={question}>{question}</li>
-                      ))}
-                    </ul>
-                  </details>
-                )}
-                {nearbyAnswer.evidence.length > 0 && (
-                  <details className="nearby-rag-details">
-                    <summary>Evidence details</summary>
-                    <div className="nearby-rag-citations">
-                      {nearbyAnswer.evidence.slice(0, 3).map((item, index) => (
-                        <article key={item.id} className="nearby-rag-citation">
-                          <strong>[E{index + 1}] {item.citation_label}</strong>
-                          <p>{item.citation_text}</p>
-                        </article>
-                      ))}
-                    </div>
-                  </details>
-                )}
-                <details className="nearby-rag-details">
-                  <summary>Technical trace</summary>
-                  <small>{nearbyRetrievalLabel(nearbyAnswer.retrieval_mode)}</small>
-                </details>
+                ))}
               </div>
             )}
+            {nearbyAskError && <p className="panel-error">{nearbyAskError}</p>}
           </section>
 
           {searchError && <p className="panel-error">{searchError}</p>}
@@ -1014,6 +893,7 @@ export default function Home() {
             setMobileView("results");
             document.getElementById("restaurant-results")?.scrollIntoView({ behavior: "smooth", block: "start" });
           }}>View restaurant results ({rankedPlaces.length})</button>}
+          <h2 className="restaurant-results-heading">Restaurants</h2>
           <div className="results-scroll" id="restaurant-results">
             {rankedPlaces.map((place) => (
               <div key={place.id} className="place-card-shell">

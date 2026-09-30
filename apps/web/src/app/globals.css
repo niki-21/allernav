@@ -3076,3 +3076,5 @@ body {
   .mobile-view-map .location-button { top: 148px; right: 12px; }
   .mobile-view-map .area-button { top: 206px; }
 }
+
+.restaurant-results-heading { margin: 0; padding: 16px 18px; border-top: 1px solid #e0e5e3; font-size: 18px; }

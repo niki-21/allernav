@@ -155,17 +155,17 @@ test("TrustPanel does not duplicate agent dish evidence in the menu tab", () => 
   assert.equal(source.includes("Dish evidence found by agent analysis"), false);
 });
 
-test("menu rows hide repeated confidence and RAG cards show one restaurant score", () => {
+test("chat excludes duplicate restaurant cards and diagnostic details", () => {
   const trustPanelSource = readFileSync(new URL("../../components/TrustPanel.tsx", import.meta.url), "utf8");
   const pageSource = readFileSync(new URL("../../app/page.tsx", import.meta.url), "utf8");
   assert.equal(trustPanelSource.includes("confidenceText"), false);
   assert.equal(pageSource.includes("suggestion.restaurant_fit_score}/100"), false);
-  assert.equal(pageSource.includes("hasScannedMenuEvidence(suggestion)"), true);
-  assert.equal(pageSource.includes("nearbyBucketSummary(suggestion)"), true);
+  assert.equal(pageSource.includes("hasScannedMenuEvidence(suggestion)"), false);
+  assert.equal(pageSource.includes("nearbyBucketSummary(suggestion)"), false);
   assert.equal(pageSource.includes("Next: {suggestion.next_action}"), false);
-  assert.equal(pageSource.includes("Ask staff about sauces, broths, and shared prep before ordering."), true);
-  assert.equal(pageSource.includes("<summary>Evidence details</summary>"), true);
-  assert.equal(pageSource.includes("<summary>Staff questions</summary>"), true);
+  assert.equal(pageSource.includes("Ask staff about sauces, broths, and shared prep before ordering."), false);
+  assert.equal(pageSource.includes("<summary>Evidence details</summary>"), false);
+  assert.equal(pageSource.includes("<summary>Staff questions</summary>"), false);
 });
 
 test("Agentic RAG hides unscanned allergy scores and polls started scans", () => {
@@ -197,8 +197,8 @@ test("Ask AllerNav searches the current map area before requesting RAG candidate
 test("no-allergy UI uses general discovery and hides allergy scoring", () => {
   const pageSource = readFileSync(new URL("../../app/page.tsx", import.meta.url), "utf8");
   const panelSource = readFileSync(new URL("../../components/TrustPanel.tsx", import.meta.url), "utf8");
-  assert.equal(pageSource.includes('nearbyAnswer.ranking_mode === "general_discovery"'), true);
-  assert.equal(pageSource.includes("nearby-rating-badge"), true);
+  assert.equal(pageSource.includes('nearbyAnswer.ranking_mode === "general_discovery"'), false);
+  assert.equal(pageSource.includes("nearby-rating-badge"), false);
   assert.equal(panelSource.includes("const allergyMode = data.selected_allergens.length > 0"), true);
   assert.equal(panelSource.includes("menuSections.length > 0 && allergyMode"), true);
   assert.equal(panelSource.includes("!allergyMode && data.rating != null"), true);
@@ -220,7 +220,7 @@ test("Menu tab leads with the fit score and possible lower-risk section", () => 
   assert.ok(source.includes("data.menu?.restaurant_fit_score ?? data.restaurant_fit_score ?? null"));
   assert.equal(source.includes("data.restaurant_fit_score ?? data.menu?.restaurant_fit_score ?? 20"), false);
   assert.ok(possibleIndex < checkIndex && checkIndex < avoidIndex && avoidIndex < insufficientIndex);
-  assert.ok(source.includes('<details className="menu-trace">'));
+  assert.equal(source.includes('<details className="menu-trace">'), false);
   assert.equal(source.includes('<details className="menu-trace" open>'), false);
   const mainMenuStart = source.indexOf('{activeTab === "menu"');
   const technicalTraceStart = source.indexOf('<details className="menu-trace">', mainMenuStart);
@@ -284,7 +284,7 @@ test("TrustPanel exposes the fast and deep menu scan lifecycle", () => {
   const source = readFileSync(new URL("../../components/TrustPanel.tsx", import.meta.url), "utf8");
   assert.ok(source.includes('"Menu found · deeper scan running"'));
   assert.ok(source.includes('"Menu found · RAG index ready"'));
-  assert.ok(source.includes("Refresh menu"));
+  assert.ok(source.includes("Retry menu scan"));
   assert.ok(source.includes("menuRefreshJob?.message"));
 });
 
@@ -299,9 +299,9 @@ test("menu refresh proxy preserves backend diagnostics", () => {
   assert.ok(source.includes("return NextResponse.json(body, { status: response.status })"));
 });
 
-test("Agentic RAG technical trace stays collapsed", () => {
+test("Agentic RAG hides technical trace", () => {
   const source = readFileSync(new URL("../../app/page.tsx", import.meta.url), "utf8");
-  assert.ok(source.includes("<summary>Technical trace</summary>"));
+  assert.equal(source.includes("<summary>Technical trace</summary>"), false);
   assert.equal(source.includes('<details className="nearby-rag-details" open>'), false);
 });
 

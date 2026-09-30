@@ -2,7 +2,6 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 
-import { scanProgress } from "@/lib/scanProgress";
 import { isIndividualFoodItem } from "@/lib/menuContent";
 
 import MenuUpload from "@/components/MenuUpload";
@@ -553,23 +552,6 @@ export default function TrustPanel({
         </div>
       )}
 
-      {menuRefreshJob && (
-        <div className="scan-progress" role="status" aria-live="polite">
-          <strong>{scanProgress(menuRefreshJob.status).label}</strong>
-          <ol aria-label="Menu scan progress">
-            {["Finding menu", "Reading dishes", "Preparing results", "Finished"].map((label, index) => (
-              <li key={label} aria-current={scanProgress(menuRefreshJob.status).step === index ? "step" : undefined}
-                className={scanProgress(menuRefreshJob.status).step >= index ? "reached" : ""}>{label}</li>
-            ))}
-          </ol>
-          {menuItemCount > 0 && <button type="button" onClick={() => {
-            setTabState({ placeId: data.id, tab: "menu" });
-            requestAnimationFrame(() => document.getElementById("menu-results")?.scrollIntoView({ behavior: "smooth", block: "start" }));
-          }}>View menu results</button>}
-          {refreshFailed && <button type="button" onClick={onRefreshMenu}>Retry scan</button>}
-        </div>
-      )}
-
       {activeTab === "menu" && (
         <div className="place-tab-panel" id="menu-results">
           {menuItemCount > 0 && <p className="menu-provenance">
@@ -635,27 +617,18 @@ export default function TrustPanel({
                       <span>{group.count}</span>
                     </div>
                     {visibleItems.map(({ item, sectionTitle, verification }) => {
-                    const tooltip = menuItemTooltip(item, verification.detail);
                     return (
                       <article
                         key={`${sectionTitle}-${item.name}`}
                         className="menu-list-item compact-menu-row"
-                        title={tooltip}
                       >
                         <div>
                           <div className="menu-item-heading">
                             <strong>{displayDishName(item.name)}</strong>
                           </div>
-                          <details className="dish-evidence">
-                            <summary>Why this label?</summary>
-                            {item.description && <p>{item.description}</p>}
-                            <p>{verification.detail}</p>
-                            {(item.risk_reasons ?? []).map((reason) => <p key={reason}>{reason}</p>)}
-                            <p>{item.verification_question || "Ask staff to confirm ingredients, sauces, and shared preparation."}</p>
-                            {item.source_url && <a href={item.source_url} target="_blank" rel="noreferrer">Dish source</a>}
-                          </details>
+
                         </div>
-                        <span className="menu-price">{item.price || "Price not listed"}</span>
+                        {item.price && <span className="menu-price">{item.price}</span>}
                       </article>
                     );
                     })}
@@ -692,14 +665,13 @@ export default function TrustPanel({
                     <article
                       key={`${section.title}-${item.name}`}
                       className="menu-list-item compact-menu-row"
-                      title={menuItemTooltip(item)}
                     >
                       <div>
                         <div className="menu-item-heading">
                           <strong>{displayDishName(item.name)}</strong>
                         </div>
                       </div>
-                      <span className="menu-price">{item.price || "Price not listed"}</span>
+                      {item.price && <span className="menu-price">{item.price}</span>}
                     </article>
                   ))}
                 </section>
@@ -735,83 +707,6 @@ export default function TrustPanel({
             </div>
           )}
 
-          {(isMenuLoading || menuRefreshJob || menuItemCount > 0) && (
-            <details className="menu-trace">
-              <summary>
-                <strong>Technical trace</strong>
-                <span className={`trace-status ${isMenuLoading ? "running" : indexingStatus ?? menuRefreshJob?.status ?? "idle"}`}>
-                  {refreshPending
-                    ? "Running"
-                    : refreshFailed
-                      ? "Needs attention"
-                      : indexingStatus === "complete" || menuRefreshJob?.status === "complete"
-                        ? "Complete"
-                        : "Available"}
-                </span>
-              </summary>
-              <div className="menu-technical-overview">
-                <p>{technicalMenuLifecycleLabel}</p>
-                {ragStatus && <p>{ragStatus.label}</p>}
-                {ocrStatus && <p>{ocrStatus.label}</p>}
-                {menuEvidenceLine && <p>{menuEvidenceLine}</p>}
-                {restaurantFitReason && <p>{restaurantFitReason}</p>}
-                {refreshFailed && <p>Refresh failed: {refreshFailureDetail}</p>}
-                <div className="menu-technical-actions">
-                  {(data.menu?.source_url || data.menu?.document_url) && (
-                    <a className="source-link" href={data.menu.source_url ?? data.menu.document_url ?? ""} target="_blank" rel="noreferrer">
-                      Open menu source
-                    </a>
-                  )}
-                  <button type="button" className="retry-button" onClick={onRefreshMenu} disabled={refreshPending}>
-                    {refreshPending ? "Scan running" : "Refresh menu"}
-                  </button>
-                </div>
-              </div>
-              <div className="menu-trace-list">
-                {(menuRefreshJob?.total_documents ?? 0) > 0 && (
-                  <p className="muted-line">
-                    {menuRefreshJob?.processed_documents ?? 0} of {menuRefreshJob?.total_documents ?? 0} menu pages processed
-                    {menuRefreshJob?.menu_version ? ` · ${menuRefreshJob.menu_version}` : ""}
-                  </p>
-                )}
-                {(menuRefreshJob?.trace ?? []).map((step) => (
-                  <article key={step.id} className={`menu-trace-step ${step.status}`}>
-                    <div>
-                      <strong>{step.label}</strong>
-                      <span>{traceStatusLabel(step.status)}</span>
-                    </div>
-                    <p>{traceDetail(step)}</p>
-                    <small>
-                      {[step.provider?.replaceAll("_", " "), typeof step.duration_ms === "number" ? `${step.duration_ms} ms` : null]
-                        .filter(Boolean)
-                        .join(" · ")}
-                    </small>
-                    {step.source_url && (
-                      <a href={step.source_url} target="_blank" rel="noreferrer">
-                        Inspect source
-                      </a>
-                    )}
-                  </article>
-                ))}
-              </div>
-              {!isMenuLoading &&
-                (menuRefreshJob?.status === "failed" || menuRefreshJob?.status === "needs_background_refresh") && (
-                <button type="button" className="retry-button" onClick={onRefreshMenu}>
-                  Retry menu scan
-                </button>
-              )}
-            </details>
-          )}
-
-          {allergyMode && (
-            <details className="menu-questions">
-              <summary>Questions to ask staff</summary>
-              <button type="button" className="ask-button" onClick={onAskRestaurant} disabled={isAskingRestaurant}>
-                {isAskingRestaurant ? "Saving question..." : "Prepare a verification question"}
-              </button>
-              {askResponse && <p className="menu-job-note">{askResponse.suggested_script}</p>}
-            </details>
-          )}
         </div>
       )}
 
