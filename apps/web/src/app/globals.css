@@ -3064,3 +3064,17 @@ body {
   .mobile-view-results .details-panel { position: fixed; inset: 154px 12px 12px; width: auto; max-height: none; z-index: 32; overflow-y: auto; }
   .mobile-view-results .area-button, .mobile-view-results .location-button { display: none; }
 }
+
+/* Keep mobile navigation independent of the legacy stacked map layout. */
+@media (max-width: 720px) {
+  .app-shell { height: 100dvh; min-height: 100dvh; overflow-x: hidden; }
+  .app-shell .map-layer { position: fixed; inset: 0; height: 100dvh; }
+  .app-shell .search-slot { position: fixed; top: 12px; left: 12px; right: 12px; width: auto; min-width: 0; transform: none; z-index: 36; }
+  .app-shell .search-bar { display: flex; flex-direction: row; gap: 8px; padding: 8px; }
+  .app-shell .search-bar input { min-width: 0; flex: 1; width: 0; }
+  .app-shell .search-submit { width: auto; flex: 0 0 auto; padding: 12px; }
+  .app-shell .mobile-view-toggle { top: 88px; }
+  .mobile-view-results .side-panels { inset: auto; padding-top: 146px; }
+  .mobile-view-map .location-button { top: 148px; right: 12px; }
+  .mobile-view-map .area-button { top: 206px; }
+}
