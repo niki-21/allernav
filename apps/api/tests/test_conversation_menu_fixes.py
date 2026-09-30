@@ -47,3 +47,7 @@ def test_chat_answers_even_before_menu_evidence_exists():
     answer.assert_awaited_once()
     assert result.answer.startswith('Which restaurant')
     assert result.places[0].restaurant_fit_score is None
+
+@pytest.mark.parametrize("name", ["Menu added by users 27 days ago", "Menu added by users a month ago", "Menu from owner 3 months ago"])
+def test_menu_metadata_is_not_food(name):
+    assert not looks_like_real_menu_item(name, "Menu added by users")

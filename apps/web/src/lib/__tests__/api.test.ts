@@ -377,7 +377,7 @@ test("nearby chat includes bounded history without system messages", () => {
 
 test("menu content excludes deals and non-food without excluding food names", async () => {
   const { isIndividualFoodItem } = await import("../menuContent.ts");
-  for (const name of ["Papa's Meal for Two", "Party Meal", "Pizza Combo", "View Menu", "Coffee", "Water"]) {
+  for (const name of ["Menu added by users 27 days ago", "Menu from owner 3 months ago", "Papa's Meal for Two", "Party Meal", "Pizza Combo", "View Menu", "Coffee", "Water"]) {
     assert.equal(isIndividualFoodItem(name), false, name);
   }
   for (const name of ["Margherita Pizza", "Coffee Cake", "Beer Battered Fish", "Chicken Biryani"]) {

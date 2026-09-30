@@ -1739,6 +1739,8 @@ def sanitize_sections(
 
 
 def looks_like_real_menu_item(name: str, description: str | None = None) -> bool:
+    if re.search(r"^menus?\b|\b(?:added|uploaded|updated)\s+by\b|\b(?:days?|weeks?|months?|years?)\s+ago\b", name.strip(), re.IGNORECASE):
+        return False
     if is_prompt_injection(name) or (description and is_prompt_injection(description)):
         return False
     normalized = name.lower()
