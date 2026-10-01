@@ -838,7 +838,7 @@ export default function Home() {
       <div className="side-panels">
         <section className="glass-panel results-panel map-drawer chat-panel">
           <AuthBar />
-          <details className="drawer-filter">
+          <details className="drawer-filter" open>
             <summary>
               <span>Allergies</span>
             </summary>
@@ -852,6 +852,16 @@ export default function Home() {
               </div>
 
             </div>
+            <details className="chat-sample-questions" open>
+              <summary>Sample questions</summary>
+              <div className="nearby-sample-queries">
+                {SAMPLE_QUESTIONS.map((question) => (
+                  <button key={question} type="button" onClick={() => setNearbyQuestion(question)}>
+                    {question}
+                  </button>
+                ))}
+              </div>
+            </details>
             {nearbyConversation.length > 0 && (
               <div ref={conversationRef} className="nearby-conversation" role="log" aria-label="Conversation with AllerNav">
                 {nearbyConversation.map((turn, index) => (

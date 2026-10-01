@@ -34,6 +34,9 @@ Diner: location, question, selected allergens
                          Azure AI Search
                     keyword + optional vector search
 
+Agent clients:
+MCP host -> stdio MCP server -> same Python service layer
+
 Optional durable ingestion:
 FastAPI -> Supabase job + Azure Service Bus -> Azure Functions
         -> Document Intelligence OCR -> Azure OpenAI normalization
@@ -96,6 +99,12 @@ These are explainable heuristics, not a trained or clinically validated risk mod
 | **LangSmith** | Optional traces for the LangGraph workflow, retrieval, OCR normalization, and RAG explanations, including evidence and outcome metadata. |
 | **Google Maps / Places** | Map display, restaurant discovery, place details, photos, and review snippets. |
 | **Apify** | Optional rendered menu discovery and expanded reviews through explicit refresh requests. |
+
+## MCP interface
+
+AllerNav exposes selected dining-safety capabilities through **Model Context Protocol**, allowing compatible AI clients to search restaurants, retrieve menu evidence, and invoke AllerNav’s deterministic allergen analysis through typed tools. The official Python MCP SDK provides a local stdio interface over the existing service layer; FastAPI remains unchanged. Six read-only tools preserve provenance, missing-evidence outcomes and staff-verification questions. Remote HTTP/authentication and menu-refresh tools are deferred.
+
+See [MCP setup, tools, safety and verification](docs/mcp.md).
 
 ## Engineering focus and current scope
 
