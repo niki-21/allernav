@@ -3078,3 +3078,14 @@ body {
 }
 
 .restaurant-results-heading { margin: 0; padding: 16px 18px; border-top: 1px solid #e0e5e3; font-size: 18px; }
+
+.chat-panel .nearby-rag-panel { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 280px; overflow: hidden; }
+.chat-panel .nearby-conversation { flex: 1 1 auto; min-height: 0; max-height: none; overflow-y: auto; align-content: start; }
+.chat-panel .nearby-rag-form { margin-top: auto; flex-shrink: 0; padding-top: 12px; border-top: 1px solid #e1e7e4; }
+.chat-panel .chat-welcome { flex: 1; color: #626b67; font-size: 14px; line-height: 1.6; }
+.chat-panel .nearby-chat-turn.user { margin-left: 28px; }
+.chat-panel .nearby-chat-turn.assistant { margin-right: 12px; }
+@media (max-width: 720px) {
+  .mobile-view-results .results-panel.chat-panel { height: calc(100dvh - 170px); overflow-y: auto; }
+  .chat-panel .drawer-filter { flex-shrink: 0; }
+}

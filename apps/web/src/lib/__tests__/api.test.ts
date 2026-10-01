@@ -190,8 +190,8 @@ test("Ask AllerNav searches the current map area before requesting RAG candidate
   assert.equal(source.includes("const intentQuery = extractSearchIntent(question, query)"), true);
   assert.equal(source.includes("visiblePlaces = await runSearch(intentQuery, mapCenter, selectedAllergens)"), true);
   assert.equal(source.includes('setNearbyAskError("No restaurants were found in this area.'), true);
-  assert.equal(source.includes('"Ready to search this area"'), true);
-  assert.equal(source.includes('"Searching area…"'), true);
+  assert.equal(source.includes('"Ready to search this area"'), false);
+  assert.equal(source.includes('role="status">Checking your question'), true);
 });
 
 test("no-allergy UI uses general discovery and hides allergy scoring", () => {

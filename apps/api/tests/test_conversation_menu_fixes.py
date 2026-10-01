@@ -51,3 +51,14 @@ def test_chat_answers_even_before_menu_evidence_exists():
 @pytest.mark.parametrize("name", ["Menu added by users 27 days ago", "Menu added by users a month ago", "Menu from owner 3 months ago"])
 def test_menu_metadata_is_not_food(name):
     assert not looks_like_real_menu_item(name, "Menu added by users")
+
+@pytest.mark.parametrize('answer,count,accepted', [
+    ('Menu lists soy [E1].', 1, True),
+    ('Menu lists soy [E2].', 1, False),
+    ('No evidence [E1].', 0, False),
+    ('Unknown [E0].', 2, False),
+    ('Which restaurant do you mean?', 0, True),
+])
+def test_citations_must_exist_in_supplied_evidence(answer, count, accepted):
+    from allernav_api.rag_service import validate_answer_citations
+    assert (validate_answer_citations(answer, count) is not None) == accepted

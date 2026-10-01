@@ -5,7 +5,6 @@ import { startTransition, useCallback, useEffect, useMemo, useRef, useState } fr
 import AllergyProfilePicker from "@/components/AllergyProfilePicker";
 import AuthBar from "@/components/AuthBar";
 import Map from "@/components/Map";
-import PlaceCard from "@/components/PlaceCard";
 import SearchBar from "@/components/searchBar";
 import TrustPanel from "@/components/TrustPanel";
 import {
@@ -112,8 +111,13 @@ export default function Home() {
   const [locationStatus, setLocationStatus] = useState<"idle" | "locating" | "denied">("idle");
   const [askResponses, setAskResponses] = useState<Record<string, AskRestaurantResponse>>({});
   const [askingPlaceId, setAskingPlaceId] = useState<string | null>(null);
-  const [nearbyQuestion, setNearbyQuestion] = useState("Suggest nearby places to evaluate for my allergies");
+  const [nearbyQuestion, setNearbyQuestion] = useState("");
+  const conversationRef = useRef<HTMLDivElement>(null);
   const [nearbyConversation, setNearbyConversation] = useState<ConversationTurn[]>([]);
+  useEffect(() => {
+    const log = conversationRef.current;
+    if (log) log.scrollTop = log.scrollHeight;
+  }, [nearbyConversation]);
   const [nearbyAnswer, setNearbyAnswer] = useState<NearbySuggestionResponse | null>(null);
   const [nearbyAskState, setNearbyAskState] = useState<"idle" | "loading" | "error">("idle");
   const [nearbyAskError, setNearbyAskError] = useState<string | null>(null);
@@ -781,7 +785,7 @@ export default function Home() {
     <main className={`app-shell mobile-view-${mobileView}`}>
       <nav className="mobile-view-toggle" aria-label="Browse restaurants">
         <button type="button" aria-pressed={mobileView === "map"} onClick={() => setMobileView("map")}>Map</button>
-        <button type="button" aria-pressed={mobileView === "results"} onClick={() => { setMobileView("results"); setSelectedPlaceId(null); }}>Results ({rankedPlaces.length})</button>
+        <button type="button" aria-pressed={mobileView === "results"} onClick={() => { setMobileView("results"); setSelectedPlaceId(null); }}>Chat</button>
       </nav>
       <div className="map-layer">
         <Map
@@ -832,9 +836,9 @@ export default function Home() {
       )}
 
       <div className="side-panels">
-        <section className="glass-panel results-panel map-drawer">
+        <section className="glass-panel results-panel map-drawer chat-panel">
           <AuthBar />
-          <details className="drawer-filter" open>
+          <details className="drawer-filter">
             <summary>
               <span>Allergies</span>
             </summary>
@@ -844,17 +848,23 @@ export default function Home() {
           <section className="nearby-rag-panel">
             <div className="nearby-rag-header">
               <div>
-                <span>Agentic RAG</span>
                 <strong>Ask AllerNav</strong>
               </div>
-              <small>
-                {isSearching
-                  ? "Searching area…"
-                  : !areaSearchCompleted || canSearchArea || rankedPlaces.length === 0
-                    ? "Ready to search this area"
-                  : `${Math.min(8, rankedPlaces.length)} search-area candidate${rankedPlaces.length === 1 ? "" : "s"}`}
-              </small>
+
             </div>
+            {nearbyConversation.length > 0 && (
+              <div ref={conversationRef} className="nearby-conversation" role="log" aria-label="Conversation with AllerNav">
+                {nearbyConversation.map((turn, index) => (
+                  <div key={index} className={`nearby-chat-turn ${turn.role}`}>
+                    <strong>{turn.role === "user" ? "You" : "AllerNav"}</strong>
+                    <p>{turn.content}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+            {nearbyConversation.length === 0 && <p className="chat-welcome">Ask about a dish, menu, or restaurant. I’ll explain what the available evidence supports.</p>}
+            {nearbyAskState === "loading" && <p role="status">Checking your question…</p>}
+            {nearbyAskError && <p className="panel-error">{nearbyAskError}</p>}
             <form
               className="nearby-rag-form"
               onSubmit={(event) => {
@@ -874,45 +884,11 @@ export default function Home() {
                 {isSearching ? "Searching..." : nearbyAskState === "loading" ? "Checking..." : "Ask"}
               </button>
             </form>
-            {nearbyConversation.length > 0 && (
-              <div className="nearby-conversation" role="log" aria-label="Conversation with AllerNav">
-                {nearbyConversation.map((turn, index) => (
-                  <div key={index} className={`nearby-chat-turn ${turn.role}`}>
-                    <strong>{turn.role === "user" ? "You" : "AllerNav"}</strong>
-                    <p>{turn.content}</p>
-                  </div>
-                ))}
-              </div>
-            )}
-            {nearbyAskError && <p className="panel-error">{nearbyAskError}</p>}
+
           </section>
 
           {searchError && <p className="panel-error">{searchError}</p>}
 
-          {rankedPlaces.length > 0 && <button type="button" className="view-results-button" onClick={() => {
-            setMobileView("results");
-            document.getElementById("restaurant-results")?.scrollIntoView({ behavior: "smooth", block: "start" });
-          }}>View restaurant results ({rankedPlaces.length})</button>}
-          <h2 className="restaurant-results-heading">Restaurants</h2>
-          <div className="results-scroll" id="restaurant-results">
-            {rankedPlaces.map((place) => (
-              <div key={place.id} className="place-card-shell">
-                <PlaceCard
-                  place={place}
-                  detailState={detailStates[place.id]}
-                  selected={place.id === selectedPlaceId}
-                  onSelect={() => selectPlace(place.id)}
-                />
-              </div>
-            ))}
-
-            {!rankedPlaces.length && !searchError && (
-              <p className="empty-results">
-                Search for restaurants, use your location, or ask AllerNav to suggest places in the current map area.
-                {locationStatus === "denied" ? " Location permission was not available." : ""}
-              </p>
-            )}
-          </div>
         </section>
 
         {selectedPlaceId && (
@@ -920,7 +896,6 @@ export default function Home() {
           <TrustPanel
             onChooseAnother={() => {
               setSelectedPlaceId(null);
-              document.getElementById("restaurant-results")?.scrollIntoView({ behavior: "smooth" });
             }}
             place={selectedPlace}
             detailState={selectedPlaceId ? detailStates[selectedPlaceId] : undefined}
