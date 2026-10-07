@@ -17,12 +17,14 @@ from .langchain_tracing import (
     update_current_trace_metadata,
 )
 from .menu_ingestion import load_menu_source
+from .menu_risk import classify_place_menu
 from .models import (
     AllergyTag,
     HybridSearchRequest,
     HybridSearchResult,
     LatLng,
     MenuSource,
+    PlaceMenu,
     NearbyPlaceSuggestion,
     NearbySuggestionRequest,
     NearbySuggestionResponse,
@@ -67,36 +69,56 @@ except ImportError:  # pragma: no cover - optional local dependency
 async def suggest_nearby_places_service(
     payload: NearbySuggestionRequest,
 ) -> NearbySuggestionResponse:
-    candidates = payload.candidate_places[: payload.max_places]
-    if not payload.allergens:
-        response = build_general_nearby_response(payload, candidates)
-        if payload.conversation:
-            response.answer = await generate_nearby_answer(payload, response.places, [], [], [])
-        return response
+    # Shortlist before loading menus: popularity is a discovery signal, never allergy evidence.
+    candidates = sorted(
+        payload.candidate_places,
+        key=lambda place: (candidate_intent_match(place, payload.query)[0] is not False,
+                           scan_priority_score(place, payload.center)),
+        reverse=True,
+    )[:min(5, payload.max_places)]
+    if not payload.allergens and not payload.conversation and not payload.allow_background_scan:
+        return build_general_nearby_response(payload, candidates)
 
     candidate_sources = [(place, load_menu_source(place.id)) for place in candidates]
-    suggestions = list(
-        await asyncio.gather(
-            *(
-                asyncio.to_thread(build_place_suggestion, place, payload, source)
-                for place, source in candidate_sources
-            )
-        )
-    )
+    suggestions = list(await asyncio.gather(*(
+        asyncio.to_thread(build_place_suggestion, place, payload, source)
+        if payload.allergens else asyncio.to_thread(build_general_place_suggestion, place, payload.center, payload.query)
+        for place, source in candidate_sources
+    )))
+    sources = {place.id: source for place, source in candidate_sources}
+    enriched = []
+    for suggestion in suggestions:
+        source = sources[suggestion.place.id]
+        if source:
+            menu = classify_place_menu(PlaceMenu(sections=source.sections, extraction_confidence=source.reliability), payload.allergens)
+            dishes = [item.model_copy(update={"source_url": item.source_url or source.source_url})
+                      for section in menu.sections for item in section.items]
+            order = {"possible_lower_risk": 0, "needs_check": 1, "insufficient_info": 2, "avoid": 3}
+            dishes.sort(key=lambda item: order.get(item.risk_label, 2))
+            suggestion = suggestion.model_copy(update={"menu_dishes": dishes[:5]})
+            if not payload.allergens:
+                result = await asyncio.to_thread(hybrid_search_menu, HybridSearchRequest(
+                    query=payload.question, restaurant_id=suggestion.place.id, top=payload.top_evidence))
+                suggestion = suggestion.model_copy(update={"evidence": result.results, "evidence_count": len(result.results)})
+        enriched.append(suggestion)
+    suggestions = enriched
     suggestions = assign_scan_priorities(suggestions, payload.center)
     if payload.allow_background_scan:
         suggestions = await start_background_scans(suggestions)
-    suggestions.sort(key=suggestion_rank_key, reverse=True)
+    suggestions.sort(key=suggestion_rank_key if payload.allergens else lambda item: item.general_match_score or 0, reverse=True)
 
     scanned = [suggestion for suggestion in suggestions if suggestion.evidence_status == "scanned"]
     scan_needed = [suggestion for suggestion in suggestions if suggestion.evidence_status != "scanned"]
     evidence = [item for suggestion in scanned for item in suggestion.evidence]
     missing_information = build_missing_information(suggestions)
-    questions = build_recommended_questions(payload.allergens)
-    top_scan_candidates = scan_needed[:3]
+    questions = build_recommended_questions(payload.allergens) if payload.allergens else []
+    top_scan_candidates = scan_needed[:5]
     answer = build_nearby_summary(payload, len(candidates), scanned, scan_needed, top_scan_candidates)
-    if payload.conversation or (scanned and evidence and re.search(r"\b(does|do|is|are|contain|contains|ingredient|allergen)\b", payload.question, re.IGNORECASE)):
-        answer = await generate_nearby_answer(payload, suggestions[:3], evidence, missing_information, questions)
+    running = sum(item.evidence_status == "scan_running" for item in suggestions)
+    if running:
+        answer = f"I’m checking menus at {running} of the {len(candidates)} shortlisted nearby places. I’ll compare the dishes when the scans finish."
+    elif payload.conversation or (scanned and evidence and re.search(r"\b(does|do|is|are|contain|contains|ingredient|allergen)\b", payload.question, re.IGNORECASE)):
+        answer = await generate_nearby_answer(payload, suggestions, evidence, missing_information, questions)
     retrieval_mode = "hybrid_keyword_semantic" if scanned else "scanned_menu_evidence_needed"
     trace_nearby_result(payload, suggestions, retrieval_mode, top_scan_candidates)
     scan_job_ids = [item.scan_job_id for item in suggestions if item.scan_job_id]
@@ -104,7 +126,7 @@ async def suggest_nearby_places_service(
     return NearbySuggestionResponse(
         answer=answer,
         retrieval_mode=retrieval_mode,
-        ranking_mode="allergy_fit",
+        ranking_mode="allergy_fit" if payload.allergens else "general_discovery",
         places=suggestions,
         evidence=evidence,
         missing_information=missing_information,
@@ -382,7 +404,7 @@ async def start_background_scans(
         suggestion
         for suggestion in sorted(suggestions, key=lambda item: item.scan_priority_rank or 999)
         if suggestion.evidence_status == "scan_needed" and suggestion.place.website_url
-    ][:2]
+    ][:5]
     if not eligible:
         return suggestions
 
@@ -747,7 +769,7 @@ def explanation_prompt(
     questions: list[str],
 ) -> dict[str, Any]:
     return {
-        "task": "Answer the latest user question directly as a conversational dining assistant. Use history to resolve follow-ups; do not replace the answer with a restaurant ranking.",
+        "task": "Answer the latest user question directly as a conversational dining assistant. Use history to resolve follow-ups. For dining recommendations, compare this shortlist and suggest up to three restaurants with specific listed dishes and prices when available. For other questions, answer directly.",
         "conversation": [turn.model_dump() for turn in payload.conversation],
         "rules": [
             "Never use the word safe or claim that a place or dish has no allergy risk.",
@@ -755,6 +777,10 @@ def explanation_prompt(
             "Use menu evidence as stronger evidence than reviews.",
             "Cite evidence ids like [E1] when discussing menu facts.",
             "Do not invent menu items, ingredients, policies, or reviews.",
+            "Use only supplied menu_dishes for dish recommendations and prices. Preserve their deterministic risk labels; never recommend an avoid-labelled dish for the selected allergies.",
+            "Distinguish an appealing restaurant from an assessed dish. Names alone with insufficient_info are unassessed, not lower-risk choices. If no suitable dishes are supported, explain this briefly and give one useful next step.",
+            "Describe findings as a comparison of this limited shortlist, not the best restaurant in the whole area. Do not treat missing menus as worse food or higher allergy risk.",
+            "No selected allergens means general dining recommendations, not an allergy assessment. Do not invent dietary restrictions.",
             "A citation must support the specific claim beside it, for the exact restaurant and dish. Never cite a different dish as proof.",
             "Absence of an allergen in menu text does not establish its absence from the dish. Missing preparation information means cross-contact is unknown.",
             "Distinguish explicit menu declarations from inference. Do not infer ingredients from a dish name, cuisine, popularity, or rating.",
@@ -774,6 +800,7 @@ def explanation_prompt(
                 "menu_item_count": suggestion.menu_item_count,
                 "confidence": suggestion.confidence,
                 "risk_note": suggestion.risk_note,
+                "menu_dishes": [item.model_dump(mode="json") for item in suggestion.menu_dishes],
                 "evidence_ids": [result.id for result in suggestion.evidence],
             }
             for suggestion in suggestions
@@ -792,7 +819,7 @@ def explanation_prompt(
         ],
         "missing_information": missing_information,
         "recommended_questions": questions,
-        "output": "Maximum 80 words. One short paragraph and, only when useful, up to 2 concise bullets. No JSON.",
+        "output": "Maximum 140 words. Lead with the useful answer; for recommendations use up to 3 short restaurant/dish bullets with available prices and specific verification needs. No technical scan report or JSON.",
     }
 
 
@@ -884,6 +911,23 @@ def deterministic_answer(
             "I can’t confirm ingredients for that question yet because I don’t have relevant menu evidence. "
             "Which restaurant and dish do you mean? A menu scan can help, and staff can confirm ingredients and preparation."
         )
+
+    dish_lines = []
+    for suggestion in suggestions:
+        dishes = [item for item in suggestion.menu_dishes
+                  if not payload.allergens or item.risk_label in {"possible_lower_risk", "needs_check"}]
+        if not dishes:
+            continue
+        dish = dishes[0]
+        price = f" — {dish.price}" if dish.price else ""
+        caution = f" {dish.verification_question or 'Confirm ingredients and shared preparation with staff.'}" if payload.allergens else ""
+        dish_lines.append(f"• {suggestion.place.name}: {dish.name}{price}.{caution}")
+        if len(dish_lines) == 3:
+            break
+    if dish_lines:
+        return "From this nearby shortlist, these dishes are worth considering:\n" + "\n".join(dish_lines)
+    if any(suggestion.menu_dishes for suggestion in suggestions):
+        return "I found menus in this shortlist, but the available dish information does not support a suitable recommendation for your selected allergies. Ask the restaurant to confirm ingredients and preparation before choosing a dish."
 
     lines = [f"For {allergen_text}, use these as verification leads, not verified choices:"]
     for suggestion in suggestions[:3]:

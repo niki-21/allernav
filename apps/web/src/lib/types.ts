@@ -371,6 +371,7 @@ export interface NearbyPlaceSuggestion {
     | "Limited fit / scan needed";
   intent_match?: boolean | null;
   intent_note?: string | null;
+  menu_dishes?: MenuItem[];
   menu_item_count: number;
   matched_allergen_items: number;
   avoid_count: number;

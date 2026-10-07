@@ -75,6 +75,8 @@ The durable image-menu worker uses **LangChain with Azure OpenAI structured outp
 
 **Azure AI Search** indexes dish-level documents with source metadata and supports keyword queries plus optional Azure OpenAI embeddings for hybrid retrieval. The checked-in [index schema](apps/api/azure_search_index.json) uses a 1,536-dimensional HNSW vector index. Without Azure Search configuration, retrieval uses local keyword and rule-based semantic matching over stored menus; this fallback does not perform vector similarity search.
 
+Chat questions now select up to five nearby candidates using existing rating, review-count, distance and intent signals, reuse stored menus, and enqueue missing-menu scans only for that shortlist. Completed checks update the conversation with dish-based suggestions and available prices. See the [question-shortlist workflow and limits](docs/question-shortlist.md).
+
 For supported evidence-backed questions, explanations try Azure OpenAI, then Gemini, then a deterministic response. Retrieval relevance and generated text do not determine the underlying allergen risk labels or restaurant-fit scores.
 
 ### Deterministic allergen safety scoring

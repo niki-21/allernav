@@ -114,7 +114,7 @@ export function buildNearbySuggestionPayload(
     candidate_place_ids: candidates.map((place) => place.id),
     candidate_places: candidates,
     allow_background_scan: allowBackgroundScan,
-    max_places: Math.min(8, Math.max(1, candidates.length || 6)),
+    max_places: Math.min(5, Math.max(1, candidates.length || 5)),
     top_evidence: 3,
   };
 }
@@ -183,10 +183,10 @@ export async function refreshPlaceMenu(
   return (await response.json()) as MenuRefreshJob;
 }
 
-export async function fetchMenuRefreshJob(jobId: string): Promise<MenuRefreshJob> {
+export async function fetchMenuRefreshJob(jobId: string, timeoutMs = 15_000): Promise<MenuRefreshJob> {
   const response = await fetch(`${API_PREFIX}/menu-refresh-jobs/${encodeURIComponent(jobId)}`, {
     cache: "no-store",
-    signal: AbortSignal.timeout(15_000),
+    signal: AbortSignal.timeout(Math.max(1, Math.min(15_000, timeoutMs))),
   });
   if (!response.ok) {
     throw new Error(`Menu refresh status failed with status ${response.status}.`);

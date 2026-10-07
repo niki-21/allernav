@@ -786,7 +786,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.scan_needed_places[0].id, "charlie")
         self.assertTrue(all(place.reason for place in response.places))
 
-    def test_nearby_rag_prioritizes_eight_unscanned_candidates_without_starting_jobs(self) -> None:
+    def test_nearby_rag_shortlists_five_unscanned_candidates_without_starting_jobs(self) -> None:
         center = LatLng(lat=40.74, lng=-73.99)
         candidates = [
             PlaceListItem(
@@ -823,25 +823,14 @@ class ApiTests(unittest.TestCase):
         ) as create_job, patch("allernav_api.rag_service.update_current_trace_metadata") as trace_metadata:
             response = asyncio.run(suggest_nearby_places_service(payload))
 
-        self.assertEqual(
-            response.answer,
-            "I found 8 nearby restaurants in this area. None have scanned menu evidence yet, so I can't compare "
-            "allergy fit. Start by scanning the top 3 candidates: L'Adresse NoMad, Hole In The Wall, and Gramercy Tavern.",
-        )
-        self.assertEqual([place.name for place in response.top_scan_candidates], [
-            "L'Adresse NoMad",
-            "Hole In The Wall",
-            "Gramercy Tavern",
-        ])
+        self.assertEqual(len(response.places), 5)
+        self.assertEqual([item.place.id for item in response.places], [f"place-{index}" for index in range(5)])
+        self.assertEqual(len(response.top_scan_candidates), 5)
         self.assertTrue(all(item.restaurant_fit_score is None for item in response.places))
         self.assertEqual([item.scan_priority_rank for item in response.places[:3]], [1, 2, 3])
         create_job.assert_not_awaited()
         self.assertEqual(trace_metadata.call_args.kwargs["flow_stage"], "scan_needed")
-        self.assertEqual(trace_metadata.call_args.kwargs["top_scan_candidates"], [
-            "L'Adresse NoMad",
-            "Hole In The Wall",
-            "Gramercy Tavern",
-        ])
+        self.assertEqual(len(trace_metadata.call_args.kwargs["top_scan_candidates"]), 5)
 
     def test_nearby_rag_replaces_placeholder_place_name(self) -> None:
         payload = NearbySuggestionRequest(
@@ -856,7 +845,7 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(response.places[0].place.name, "This restaurant")
         self.assertNotIn("Selected place", response.answer)
 
-    def test_nearby_rag_starts_at_most_two_background_scans(self) -> None:
+    def test_nearby_rag_starts_at_most_five_background_scans(self) -> None:
         candidates = [
             PlaceListItem(
                 id=f"place-{index}",
@@ -864,7 +853,7 @@ class ApiTests(unittest.TestCase):
                 location=LatLng(lat=40 + index / 100, lng=-73),
                 website_url=f"https://place-{index}.example",
             )
-            for index in range(3)
+            for index in range(7)
         ]
         payload = NearbySuggestionRequest(
             candidate_places=candidates,
@@ -879,19 +868,19 @@ class ApiTests(unittest.TestCase):
                 message="Queued",
                 created_at="2026-06-30T00:00:00Z",
             )
-            for index in range(2)
+            for index in range(5)
         ]
         with patch("allernav_api.rag_service.load_menu_source", return_value=None), patch(
             "allernav_api.service.create_menu_refresh_job", new=AsyncMock(side_effect=jobs)
         ) as create_job:
             response = asyncio.run(suggest_nearby_places_service(payload))
 
-        self.assertEqual(create_job.await_count, 2)
+        self.assertEqual(create_job.await_count, 5)
         self.assertTrue(all(call.kwargs["allow_local_fallback"] is False for call in create_job.await_args_list))
-        self.assertEqual(sum(item.evidence_status == "scan_running" for item in response.places), 2)
-        self.assertEqual(sum(item.evidence_status == "scan_needed" for item in response.places), 1)
-        self.assertEqual(response.scan_job_ids, ["job-0", "job-1"])
-        self.assertIn("I started menu scans for Place 0 and Place 1.", response.answer)
+        self.assertEqual(sum(item.evidence_status == "scan_running" for item in response.places), 5)
+        self.assertEqual(sum(item.evidence_status == "scan_needed" for item in response.places), 0)
+        self.assertEqual(response.scan_job_ids, [f"job-{index}" for index in range(5)])
+        self.assertIn("checking menus at 5", response.answer)
 
     def test_nearby_rag_marks_one_failed_background_scan_without_failing_request(self) -> None:
         candidates = [

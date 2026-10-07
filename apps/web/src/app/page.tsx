@@ -124,6 +124,7 @@ export default function Home() {
   const [menuLoadingPlaceIds, setMenuLoadingPlaceIds] = useState<Set<string>>(() => new Set());
   const [menuRefreshJobs, setMenuRefreshJobs] = useState<Record<string, MenuRefreshJob>>({});
   const initialized = useRef(false);
+  const locationConfirmed = useRef(false);
   const hydratedAllergenKey = useRef<string | null>(null);
   const requestSequence = useRef(0);
   const menuRefreshAttempts = useRef<Set<string>>(new Set());
@@ -390,6 +391,7 @@ export default function Home() {
       allergens: AllergyTag[],
       options: {
         focusTopResult?: boolean;
+        selectFirst?: boolean;
       } = {},
     ) => {
       const sequence = ++requestSequence.current;
@@ -408,7 +410,7 @@ export default function Home() {
 
         startTransition(() => {
           setPlaces(response.places);
-          setSelectedPlaceId(firstPlace?.id ?? null);
+          setSelectedPlaceId(options.selectFirst === false ? null : firstPlace?.id ?? null);
           setMapFocusPlaceId(options.focusTopResult ? firstPlace?.id ?? null : null);
           setSearchTargetPlaceId(options.focusTopResult ? firstPlace?.id ?? null : null);
           setSearchCenter(focusedCenter);
@@ -551,6 +553,7 @@ export default function Home() {
           lat: position.coords.latitude,
           lng: position.coords.longitude,
         };
+        locationConfirmed.current = true;
         setLocationStatus("idle");
         setSearchCenter(center);
         setMapCenter(center);
@@ -581,14 +584,37 @@ export default function Home() {
     if (!question) {
       return;
     }
+    setSelectedPlaceId(null);
+    let questionCenter = mapCenter;
+    if (!locationConfirmed.current) {
+      if (locationStatus === "locating") return;
+      setLocationStatus("locating");
+      try {
+        questionCenter = await new Promise<LatLng>((resolve, reject) => {
+          if (!navigator.geolocation) { reject(new Error("Location unavailable")); return; }
+          navigator.geolocation.getCurrentPosition(
+            ({ coords }) => resolve({ lat: coords.latitude, lng: coords.longitude }), reject,
+            { timeout: 8000, maximumAge: 60_000 },
+          );
+        });
+        locationConfirmed.current = true;
+        setLocationStatus("idle");
+        setMapCenter(questionCenter);
+        setSearchCenter(questionCenter);
+      } catch {
+        setLocationStatus("denied");
+        setNearbyAskError("Choose an area on the map or use the search bar, then ask again. I couldn’t access your location.");
+        return;
+      }
+    }
     const intentQuery = extractSearchIntent(question, query);
     const intentChanged = intentQuery.toLowerCase() !== (query.trim() || "restaurants").toLowerCase();
     let visiblePlaces = rankedPlaces;
-    if (!areaSearchCompleted || canSearchArea || visiblePlaces.length === 0 || intentChanged) {
+    if (!areaSearchCompleted || canSearchArea || visiblePlaces.length === 0 || intentChanged || questionCenter !== mapCenter) {
       if (intentChanged) {
         setQuery(intentQuery);
       }
-      visiblePlaces = await runSearch(intentQuery, mapCenter, selectedAllergens);
+      visiblePlaces = await runSearch(intentQuery, questionCenter, selectedAllergens, { selectFirst: false });
       if (visiblePlaces.length === 0) {
         setNearbyAskState("error");
         setNearbyAskError("No restaurants were found in this area. Try moving the map or changing the search.");
@@ -611,7 +637,7 @@ export default function Home() {
         return {
           ...current,
           places: current.places.map((suggestion) => {
-            if (suggestion.evidence_status !== "scan_needed" || scansMarked >= 3) {
+            if (suggestion.evidence_status !== "scan_needed" || scansMarked >= 5) {
               return suggestion;
             }
             scansMarked += 1;
@@ -634,7 +660,7 @@ export default function Home() {
       }
       const response = await askNearbyPlaces(
         question,
-        mapCenter,
+        questionCenter,
         selectedAllergens,
         candidatePlaces,
         allowBackgroundScan,
@@ -653,104 +679,37 @@ export default function Home() {
       runningScans.forEach((suggestion) => menuRefreshAttempts.current.add(suggestion.place.id));
       if (allowBackgroundScan && runningScans.length > 0) {
         void (async () => {
-          const terminalStatuses = new Set(["complete", "failed", "needs_background_refresh"]);
-          const loadedMenuIds = new Set<string>();
-          for (let attempt = 0; attempt < 90; attempt += 1) {
-            await new Promise((resolve) => window.setTimeout(resolve, 2_000));
-            if (requestId !== nearbyRequestSequence.current) {
-              return;
-            }
-            const jobs = (
-              await Promise.all(
-                runningScans.map(async (suggestion) => {
-                  try {
-                    return await fetchMenuRefreshJob(suggestion.scan_job_id as string);
-                  } catch {
-                    return null;
-                  }
-                }),
-              )
-            ).filter((job): job is MenuRefreshJob => job !== null);
-            if (requestId !== nearbyRequestSequence.current) {
-              return;
-            }
-            setMenuRefreshJobs((current) => ({
-              ...current,
-              ...Object.fromEntries(jobs.map((job) => [job.place_id, job])),
-            }));
-
-            const menuReadyJobs = jobs.filter(
-              (job) => (job.item_count ?? 0) > 0 && !loadedMenuIds.has(job.place_id),
-            );
-            if (menuReadyJobs.length > 0) {
-              menuReadyJobs.forEach((job) => loadedMenuIds.add(job.place_id));
-              const refreshedDetails = await Promise.allSettled(
-                menuReadyJobs.map(async (job) => {
-                  const [details, menu] = await Promise.all([
-                    fetchPlaceDetails(job.place_id, selectedAllergens),
-                    fetchPlaceMenu(job.place_id, selectedAllergens),
-                  ]);
-                  return { job, details: { ...details, menu: menu ?? details.menu } };
-                }),
-              );
-              if (requestId !== nearbyRequestSequence.current) {
-                return;
+          try {
+            const terminalStatuses = new Set(["complete", "failed", "needs_background_refresh"]);
+            const deadline = Date.now() + 60_000;
+            let completed = false;
+            while (Date.now() < deadline) {
+              await new Promise((resolve) => window.setTimeout(resolve, 2_000));
+              if (requestId !== nearbyRequestSequence.current) return;
+              if (Date.now() >= deadline) break;
+              const jobs = (await Promise.all(runningScans.map(async (suggestion) => {
+                try { return await fetchMenuRefreshJob(suggestion.scan_job_id as string, deadline - Date.now()); }
+                catch { return null; }
+              }))).filter((job): job is MenuRefreshJob => job !== null);
+              if (requestId !== nearbyRequestSequence.current) return;
+              setMenuRefreshJobs((current) => ({ ...current, ...Object.fromEntries(jobs.map((job) => [job.place_id, job])) }));
+              if (jobs.length === runningScans.length && jobs.every((job) => terminalStatuses.has(job.status))) {
+                completed = true;
+                break;
               }
-              setDetailStates((current) => {
-                let next = current;
-                refreshedDetails.forEach((result) => {
-                  if (result.status === "fulfilled") {
-                    next = applyPlaceDetailSuccess(next, result.value.job.place_id, result.value.details);
-                  }
-                });
-                return next;
-              });
-              const reranked = await askNearbyPlaces(
-                question,
-                mapCenter,
-                selectedAllergens,
-                candidatePlaces,
-                false,
-                intentQuery,
-              );
-              if (requestId !== nearbyRequestSequence.current) {
-                return;
-              }
-              const stillRunning = new globalThis.Map(
-                jobs
-                  .filter((job) => !terminalStatuses.has(job.status) && (job.item_count ?? 0) === 0)
-                  .map((job) => [job.place_id, job]),
-              );
-              setNearbyAnswer({
-                ...reranked,
-                places: reranked.places.map((suggestion) => {
-                  const activeJob = stillRunning.get(suggestion.place.id);
-                  return activeJob
-                    ? {
-                        ...suggestion,
-                        evidence_status: "scan_running" as const,
-                        scan_job_id: activeJob.id,
-                        restaurant_fit_score: null,
-                      }
-                    : suggestion;
-                }),
-              });
             }
-            if (jobs.length === runningScans.length && jobs.every((job) => terminalStatuses.has(job.status))) {
-              const reranked = await askNearbyPlaces(
-                question,
-                mapCenter,
-                selectedAllergens,
-                candidatePlaces,
-                false,
-                intentQuery,
-              );
-              if (requestId !== nearbyRequestSequence.current) {
-                return;
-              }
-              setNearbyAnswer(reranked);
-              break;
-            }
+            if (requestId !== nearbyRequestSequence.current) return;
+            // Keep the original shortlist and conversation; never launch more scans while polling.
+            const updated = await askNearbyPlaces(question, questionCenter, selectedAllergens,
+              response.places.map((suggestion) => suggestion.place), false, intentQuery, conversation);
+            if (requestId !== nearbyRequestSequence.current) return;
+            const answer = completed ? updated.answer : `${updated.answer} Some menu checks haven’t returned a final result yet; this comparison uses the evidence available so far.`;
+            setNearbyAnswer(updated);
+            setNearbyConversation([...conversation, { role: "assistant" as const, content: answer.slice(0, 2000) }].slice(-10));
+          } catch {
+            if (requestId !== nearbyRequestSequence.current) return;
+            setNearbyConversation([...conversation, { role: "assistant" as const,
+              content: "I couldn’t finish comparing the menus. The scans may still complete, but I don’t have a dish recommendation yet. Please try your question again." }].slice(-10));
           }
         })();
       }
@@ -799,6 +758,7 @@ export default function Home() {
           onPlaceSelect={(id) => { selectPlace(id); setMobileView("results"); }}
           onNativePlaceSelect={(place) => { void selectNativePlace(place); setMobileView("results"); }}
           onMapCenterChange={(center) => {
+            locationConfirmed.current = true;
             resetNearbyRag();
             setMapCenter(center);
           }}
@@ -813,6 +773,7 @@ export default function Home() {
             setQuery(nextQuery);
           }}
           onSearch={(nextQuery) => {
+            locationConfirmed.current = true;
             setQuery(nextQuery);
             void runSearch(nextQuery, mapCenter, selectedAllergens, { focusTopResult: true });
           }}

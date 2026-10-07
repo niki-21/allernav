@@ -172,9 +172,11 @@ test("Agentic RAG hides unscanned allergy scores and polls started scans", () =>
   const source = readFileSync(new URL("../../app/page.tsx", import.meta.url), "utf8");
   assert.equal(source.includes("Scan priority #"), false);
   assert.equal(source.includes('scan_running: "Scanning menu…"'), true);
-  assert.equal(source.includes("fetchMenuRefreshJob(suggestion.scan_job_id as string)"), true);
-  assert.equal(source.includes("fetchPlaceMenu(job.place_id, selectedAllergens)"), true);
-  assert.equal(source.includes("setNearbyAnswer(reranked)"), true);
+  assert.equal(source.includes("fetchMenuRefreshJob(suggestion.scan_job_id as string, deadline - Date.now())"), true);
+  assert.equal(source.includes("Date.now() + 60_000"), true);
+  assert.equal(source.includes("setNearbyAnswer(updated)"), true);
+  assert.equal(source.includes("false, intentQuery, conversation"), true);
+  assert.equal(source.includes("content: answer.slice(0, 2000)"), true);
 });
 
 test("Agentic RAG resets when the active search context changes", () => {
@@ -188,7 +190,7 @@ test("Agentic RAG resets when the active search context changes", () => {
 test("Ask AllerNav searches the current map area before requesting RAG candidates", () => {
   const source = readFileSync(new URL("../../app/page.tsx", import.meta.url), "utf8");
   assert.equal(source.includes("const intentQuery = extractSearchIntent(question, query)"), true);
-  assert.equal(source.includes("visiblePlaces = await runSearch(intentQuery, mapCenter, selectedAllergens)"), true);
+  assert.equal(source.includes("visiblePlaces = await runSearch(intentQuery, questionCenter, selectedAllergens, { selectFirst: false })"), true);
   assert.equal(source.includes('setNearbyAskError("No restaurants were found in this area.'), true);
   assert.equal(source.includes('"Ready to search this area"'), false);
   assert.equal(source.includes('role="status">Checking your question'), true);
@@ -394,4 +396,12 @@ test("scan progress distinguishes reading, completion and failure", async () => 
   assert.equal(scanProgress("complete").step, 3);
   assert.equal(scanProgress("failed").step, -1);
   assert.notEqual(scanProgress("needs_background_refresh").step, 3);
+});
+
+
+test("nearby questions send candidates but cap the inspected shortlist at five", () => {
+  const candidates = Array.from({ length: 8 }, (_, i) => ({ id: `p${i}`, name: `Place ${i}`, location: {lat:25, lng:55} }));
+  const payload = buildNearbySuggestionPayload("Where should I eat?", {lat:25, lng:55}, ["dairy"], candidates, true);
+  assert.equal(payload.candidate_places.length, 8);
+  assert.equal(payload.max_places, 5);
 });

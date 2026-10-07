@@ -400,6 +400,7 @@ class NearbyPlaceSuggestion(BaseModel):
     ] = "Scan needed"
     intent_match: bool | None = None
     intent_note: str | None = None
+    menu_dishes: list[MenuItem] = Field(default_factory=list)
     menu_item_count: int = Field(default=0, ge=0)
     matched_allergen_items: int = Field(default=0, ge=0)
     avoid_count: int = Field(default=0, ge=0)
