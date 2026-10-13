@@ -631,6 +631,11 @@ async def generate_nearby_answer(
     missing_information: list[str],
     questions: list[str],
 ) -> str:
+    # Discovery requests ask for choices, not an inventory of allergen matches.
+    # Keep selection deterministic so a model cannot promote an avoid-labelled dish.
+    if re.search(r"\b(clearest|best|recommend|suggest|where|which nearby|what can i eat)\b", payload.question, re.I):
+        return deterministic_answer(payload, suggestions, missing_information, questions)
+
     metadata = explanation_trace_metadata(payload, suggestions, evidence)
 
     async def explain(_input: dict[str, str]) -> str:
@@ -775,6 +780,7 @@ def explanation_prompt(
             "Never use the word safe or claim that a place or dish has no allergy risk.",
             "Use cautious language: possible lower-risk, needs verification, ask staff, insufficient evidence.",
             "Use menu evidence as stronger evidence than reviews.",
+            "Lead with dishes the user could consider after verification, not examples of allergen matches. Never suggest a dish containing a selected allergen as merely needing verification. An avoid label remains avoid.",
             "Cite evidence ids like [E1] when discussing menu facts.",
             "Do not invent menu items, ingredients, policies, or reviews.",
             "Use only supplied menu_dishes for dish recommendations and prices. Preserve their deterministic risk labels; never recommend an avoid-labelled dish for the selected allergies.",
@@ -920,7 +926,13 @@ def deterministic_answer(
             continue
         dish = dishes[0]
         price = f" — {dish.price}" if dish.price else ""
-        caution = f" {dish.verification_question or 'Confirm ingredients and shared preparation with staff.'}" if payload.allergens else ""
+        caution = ""
+        if payload.allergens:
+            caution = (
+                " Possible lower risk; confirm ingredients and preparation with staff."
+                if dish.risk_label == "possible_lower_risk"
+                else " Needs staff confirmation of ingredients and preparation before choosing."
+            )
         dish_lines.append(f"• {suggestion.place.name}: {dish.name}{price}.{caution}")
         if len(dish_lines) == 3:
             break

@@ -21,6 +21,7 @@ export default function AllergyProfilePicker({
             key={option.value}
             type="button"
             className={`allergy-chip ${selected ? "active" : ""}`}
+            aria-pressed={selected}
             onClick={() => onToggle(option.value)}
           >
             <span className="allergy-chip-dot" />

@@ -193,7 +193,7 @@ test("Ask AllerNav searches the current map area before requesting RAG candidate
   assert.equal(source.includes("visiblePlaces = await runSearch(intentQuery, questionCenter, selectedAllergens, { selectFirst: false })"), true);
   assert.equal(source.includes('setNearbyAskError("No restaurants were found in this area.'), true);
   assert.equal(source.includes('"Ready to search this area"'), false);
-  assert.equal(source.includes('role="status">Checking your question'), true);
+  assert.equal(source.includes('className="chat-loading" role="status"'), true);
 });
 
 test("no-allergy UI uses general discovery and hides allergy scoring", () => {
@@ -404,4 +404,15 @@ test("nearby questions send candidates but cap the inspected shortlist at five",
   const payload = buildNearbySuggestionPayload("Where should I eat?", {lat:25, lng:55}, ["dairy"], candidates, true);
   assert.equal(payload.candidate_places.length, 8);
   assert.equal(payload.max_places, 5);
+});
+
+
+test("chat hides raw evidence IDs and keeps readable, validated menu sources", async () => {
+  const { readableAnswer, menuSources } = await import("../chatPresentation.ts");
+  assert.equal(readableAnswer("Rice bowl [E1][E2]."), "Rice bowl.");
+  const response = { evidence: [
+    { restaurant_name: "Cafe", source_url: "https://cafe.example/menu" },
+    { restaurant_name: "Bad link", source_url: "javascript:alert(1)" },
+  ], places: [] } as unknown as import("../types").NearbySuggestionResponse;
+  assert.deepEqual(menuSources(response), [{ label: "Cafe menu", url: "https://cafe.example/menu", evidenceId: "E1" }]);
 });

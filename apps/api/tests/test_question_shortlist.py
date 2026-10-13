@@ -89,3 +89,25 @@ def test_followup_refresh_reads_results_without_starting_more_jobs():
     assert not scans
     assert not result.scan_job_ids
     assert all(item.restaurant_fit_score is None for item in result.places)
+
+
+def test_clearest_evidence_means_eligible_dishes_not_allergen_examples():
+    source = MenuSource(source_type=SourceType.OFFICIAL_MENU, reliability=.95,
+        sections=[MenuSection(title="Dinner", items=[
+            MenuItem(name="Grilled Salmon", description="Salmon fillet", confirmed_allergens=[AllergyTag.FISH]),
+            MenuItem(name="Blue Cheese Wings", description="Chicken with blue cheese", confirmed_allergens=[AllergyTag.DAIRY]),
+            MenuItem(name="Steamed Rice", description="Rice and water, no sauces"),
+        ])])
+    result, _, _ = run(request(question="Which nearby restaurants have the clearest menu evidence for my allergies?", allergens=[AllergyTag.FISH, AllergyTag.DAIRY]), source)
+    assert "Grilled Salmon" not in result.answer
+    assert "Blue Cheese Wings" not in result.answer
+    assert "Steamed Rice" in result.answer
+    assert "confirm" in result.answer.lower()
+
+
+def test_all_avoid_menu_does_not_become_a_recommendation():
+    source = MenuSource(sections=[MenuSection(title="Dinner", items=[
+        MenuItem(name="Salmon", description="Fish fillet", confirmed_allergens=[AllergyTag.FISH])])])
+    result, _, _ = run(request(question="Which nearby restaurants have the clearest evidence?", allergens=[AllergyTag.FISH]), source)
+    assert "Salmon" not in result.answer
+    assert "does not support a suitable recommendation" in result.answer

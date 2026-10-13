@@ -2,6 +2,8 @@
 
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { menuSources, readableAnswer } from "@/lib/chatPresentation";
+
 import AllergyProfilePicker from "@/components/AllergyProfilePicker";
 import AuthBar from "@/components/AuthBar";
 import Map from "@/components/Map";
@@ -119,6 +121,8 @@ export default function Home() {
     if (log) log.scrollTop = log.scrollHeight;
   }, [nearbyConversation]);
   const [nearbyAnswer, setNearbyAnswer] = useState<NearbySuggestionResponse | null>(null);
+  const [chatPhase, setChatPhase] = useState<string | null>(null);
+  const [allergiesOpen, setAllergiesOpen] = useState(true);
   const [nearbyAskState, setNearbyAskState] = useState<"idle" | "loading" | "error">("idle");
   const [nearbyAskError, setNearbyAskError] = useState<string | null>(null);
   const [menuLoadingPlaceIds, setMenuLoadingPlaceIds] = useState<Set<string>>(() => new Set());
@@ -138,6 +142,7 @@ export default function Home() {
     setNearbyAnswer(null);
     setNearbyConversation([]);
     setNearbyAskError(null);
+    setChatPhase(null);
     setNearbyAskState("idle");
   }, []);
 
@@ -585,10 +590,12 @@ export default function Home() {
       return;
     }
     setSelectedPlaceId(null);
+    setChatPhase("Finding nearby places…");
     let questionCenter = mapCenter;
     if (!locationConfirmed.current) {
       if (locationStatus === "locating") return;
       setLocationStatus("locating");
+      setChatPhase("Finding your location…");
       try {
         questionCenter = await new Promise<LatLng>((resolve, reject) => {
           if (!navigator.geolocation) { reject(new Error("Location unavailable")); return; }
@@ -603,6 +610,7 @@ export default function Home() {
         setSearchCenter(questionCenter);
       } catch {
         setLocationStatus("denied");
+        setChatPhase(null);
         setNearbyAskError("Choose an area on the map or use the search bar, then ask again. I couldn’t access your location.");
         return;
       }
@@ -617,6 +625,7 @@ export default function Home() {
       visiblePlaces = await runSearch(intentQuery, questionCenter, selectedAllergens, { selectFirst: false });
       if (visiblePlaces.length === 0) {
         setNearbyAskState("error");
+        setChatPhase(null);
         setNearbyAskError("No restaurants were found in this area. Try moving the map or changing the search.");
         return;
       }
@@ -627,6 +636,7 @@ export default function Home() {
     setNearbyConversation(conversation);
     const requestId = ++nearbyRequestSequence.current;
     setNearbyAskState("loading");
+    setChatPhase("Finding restaurant menus…");
     setNearbyAskError(null);
     if (allowBackgroundScan) {
       setNearbyAnswer((current) => {
@@ -658,6 +668,7 @@ export default function Home() {
       if (requestId !== nearbyRequestSequence.current) {
         return;
       }
+      setChatPhase("Checking dishes for your preferences…");
       const response = await askNearbyPlaces(
         question,
         questionCenter,
@@ -671,13 +682,14 @@ export default function Home() {
         return;
       }
       setNearbyAnswer(response);
-      setNearbyConversation([...conversation, { role: "assistant" as const, content: response.answer.slice(0, 2000) }].slice(-10));
+      setNearbyConversation([...conversation, { role: "assistant" as const, content: response.answer.slice(0, 2000), sources: menuSources(response) }].slice(-10));
       setNearbyQuestion("");
       const runningScans = response.places.filter(
         (suggestion) => suggestion.evidence_status === "scan_running" && suggestion.scan_job_id,
       );
       runningScans.forEach((suggestion) => menuRefreshAttempts.current.add(suggestion.place.id));
       if (allowBackgroundScan && runningScans.length > 0) {
+        setChatPhase("Reading menus and finding dishes…");
         void (async () => {
           try {
             const terminalStatuses = new Set(["complete", "failed", "needs_background_refresh"]);
@@ -700,18 +712,23 @@ export default function Home() {
             }
             if (requestId !== nearbyRequestSequence.current) return;
             // Keep the original shortlist and conversation; never launch more scans while polling.
+            setChatPhase("Putting your recommendations together…");
             const updated = await askNearbyPlaces(question, questionCenter, selectedAllergens,
               response.places.map((suggestion) => suggestion.place), false, intentQuery, conversation);
             if (requestId !== nearbyRequestSequence.current) return;
             const answer = completed ? updated.answer : `${updated.answer} Some menu checks haven’t returned a final result yet; this comparison uses the evidence available so far.`;
             setNearbyAnswer(updated);
-            setNearbyConversation([...conversation, { role: "assistant" as const, content: answer.slice(0, 2000) }].slice(-10));
+            setNearbyConversation([...conversation, { role: "assistant" as const, content: answer.slice(0, 2000), sources: menuSources(updated) }].slice(-10));
           } catch {
             if (requestId !== nearbyRequestSequence.current) return;
             setNearbyConversation([...conversation, { role: "assistant" as const,
               content: "I couldn’t finish comparing the menus. The scans may still complete, but I don’t have a dish recommendation yet. Please try your question again." }].slice(-10));
+          } finally {
+            if (requestId === nearbyRequestSequence.current) setChatPhase(null);
           }
         })();
+      } else {
+        setChatPhase(null);
       }
     } catch (error) {
       if (requestId !== nearbyRequestSequence.current) {
@@ -732,6 +749,7 @@ export default function Home() {
         );
       }
       setNearbyAskState("error");
+      setChatPhase(null);
       setNearbyAskError(nearbyRagErrorMessage(error));
       return;
     }
@@ -799,9 +817,10 @@ export default function Home() {
       <div className="side-panels">
         <section className="glass-panel results-panel map-drawer chat-panel">
           <AuthBar />
-          <details className="drawer-filter" open>
+          <details className="drawer-filter" open={allergiesOpen} onToggle={(event) => setAllergiesOpen(event.currentTarget.open)}>
             <summary>
-              <span>Allergies</span>
+              <span>Allergies <small>{selectedAllergens.length} selected</small></span>
+              <span className="allergy-collapse-label">{allergiesOpen ? "Collapse ▴" : "Expand ▾"}</span>
             </summary>
             <AllergyProfilePicker selectedAllergens={selectedAllergens} onToggle={toggleAllergen} />
           </details>
@@ -828,13 +847,21 @@ export default function Home() {
                 {nearbyConversation.map((turn, index) => (
                   <div key={index} className={`nearby-chat-turn ${turn.role}`}>
                     <strong>{turn.role === "user" ? "You" : "AllerNav"}</strong>
-                    <p>{turn.content}</p>
+                    <p>{turn.role === "assistant" ? readableAnswer(turn.content) : turn.content}</p>
+                    {turn.role === "assistant" && !!turn.sources?.length && (
+                      <details className="chat-sources">
+                        <summary>Menu sources</summary>
+                        {turn.sources.filter((source, i, all) => all.findIndex((other) => other.url === source.url) === i).map((source) => (
+                          <a key={source.url} href={source.url} target="_blank" rel="noopener noreferrer">{source.label}</a>
+                        ))}
+                      </details>
+                    )}
                   </div>
                 ))}
               </div>
             )}
             {nearbyConversation.length === 0 && <p className="chat-welcome">Ask about a dish, menu, or restaurant. I’ll explain what the available evidence supports.</p>}
-            {nearbyAskState === "loading" && <p role="status">Checking your question…</p>}
+            {(chatPhase || isSearching) && <div className="chat-loading" role="status" aria-live="polite"><span className="chat-spinner" aria-hidden="true" /><span>{isSearching ? "Finding nearby places…" : chatPhase}</span></div>}
             {nearbyAskError && <p className="panel-error">{nearbyAskError}</p>}
             <form
               className="nearby-rag-form"

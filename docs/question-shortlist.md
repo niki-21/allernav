@@ -16,5 +16,5 @@ General dining questions with no allergens use the same menu-collection flow wit
 - Existing stored evidence is reused; this change does not introduce a new freshness/expiration policy. Existing explicit menu refresh remains available.
 - The polling budget excludes initial search and final answer-generation latency. Background jobs can finish after the UI stops waiting.
 - Cuisine detection and candidate ranking retain existing heuristics. This is a bounded workflow, not an unrestricted LLM tool-selection loop.
-- The LLM receives deterministic dish labels and grounding instructions. Existing answer validation is unchanged; it is not a full semantic proof that every generated claim follows its citation.
+- Broad discovery questions (including “clearest evidence” and “best”) use deterministic dish selection and concise answers rather than letting the LLM choose allergen matches as recommendations. Avoid and insufficient-info dishes are excluded from allergy suggestions. Other conversational answers still use the LLM with grounding instructions; their citation validation is not a full semantic proof. The UI hides internal evidence IDs and exposes validated menu links under each reply.
 - External API calls are mocked in regression tests. Live scan quality and production deployment are separate verification steps.

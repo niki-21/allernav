@@ -1,4 +1,4 @@
-export interface ConversationTurn { role: "user" | "assistant"; content: string; }
+export interface ConversationTurn { role: "user" | "assistant"; content: string; sources?: { label: string; url: string; evidenceId?: string }[]; }
 
 export type AllergyTag =
   | "peanut"
